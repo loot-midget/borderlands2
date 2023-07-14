@@ -1,18 +1,7 @@
 #!/usr/bin/env python
-# vim: set expandtab tabstop=4 shiftwidth=4:
-
 import os
 import sys
 import subprocess
-
-if True:
-    print('This was just a utility I used when porting to Python 3, to compare')
-    print('the outputs to the Python 2 version (to ensure that nothing was')
-    print('subtly broken.  Really some unit tests would have been the long-term')
-    print('better way to go, but whatever.  Anyway, not really for general use,')
-    print('though I figured I would commit it anyway, in case I think of')
-    print('something else that needs checking.')
-    sys.exit(0)
 
 
 class Test(object):
@@ -80,11 +69,6 @@ class Test(object):
                 os.unlink(output_files[1])
 
 
-# First clear out our output directory
-print('Cleaning output directory')
-for filename in os.listdir(Test.output_dir):
-    os.unlink(os.path.join(Test.output_dir, filename))
-
 tests = [
     Test('noargs', 'toptier.sav', []),
     Test('copy', 'toptier.sav', ['-o', 'savegame']),
@@ -122,5 +106,26 @@ tests = [
     Test('maxammo', 'early.sav', ['--maxammo']),
 ]
 
-for test in tests:
-    test.run()
+
+def main():
+    # First clear out our output directory
+    print('Cleaning output directory')
+    for filename in os.listdir(Test.output_dir):
+        os.unlink(os.path.join(Test.output_dir, filename))
+
+    for test in tests:
+        test.run()
+
+
+if __name__ == '__main__':
+    if True:
+        print('This was just a utility I used when porting to Python 3, to compare')
+        print('the outputs to the Python 2 version (to ensure that nothing was')
+        print('subtly broken.  Really some unit tests would have been the long-term')
+        print('better way to go, but whatever.  Anyway, not really for general use,')
+        print('though I figured I would commit it anyway, in case I think of')
+        print('something else that needs checking.')
+        sys.exit(0)
+
+    # noinspection PyUnreachableCode
+    main()
