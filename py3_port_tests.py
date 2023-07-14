@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+NOTE: cleanup tests code
+"""
 import os
 import sys
 import subprocess
