@@ -80,21 +80,21 @@ class Config(argparse.Namespace):
             [
                 var is not None
                 for var in [
-                    self.name,
-                    self.save_game_id,
-                    self.level,
-                    self.money,
+                    self.backpack,
+                    self.bank,
                     self.eridium,
+                    self.gunslots,
+                    self.itemlevels,
+                    self.level,
+                    self.maxammo,
+                    self.money,
                     self.moonstone,
+                    self.name,
+                    self.oplevel,
+                    self.save_game_id,
                     self.seraph,
                     self.seraph,
                     self.torgue,
-                    self.itemlevels,
-                    self.backpack,
-                    self.bank,
-                    self.gunslots,
-                    self.maxammo,
-                    self.oplevel,
                 ]
             ]
         ):
@@ -121,7 +121,7 @@ class Config(argparse.Namespace):
             if self.level < 1:
                 parser.error('level must be at least 1')
             if self.level > app.max_level:
-                parser.error('level can be at most {}'.format(app.max_level))
+                parser.error(f'level can be at most {app.max_level}')
 
         # Sort out 'backpack'
         if self.backpack is not None:
@@ -560,7 +560,7 @@ class App(object):
             self.data = data
 
         def __repr__(self):
-            return 'hn({}, {})'.format(self.weight, self.data)
+            return f'hn({self.weight}, {self.data})'
 
         def __lt__(self, other):
             """
@@ -971,7 +971,7 @@ class App(object):
 
         challenges = self.challenges
 
-        (unknown, size_in_bytes, num_challenges) = struct.unpack('{}IIH'.format(self.config.endian), data[:10])
+        (unknown, size_in_bytes, num_challenges) = struct.unpack(self.config.endian + 'IIH', data[:10])
         mydict = {'unknown': unknown}
 
         # Sanity check on size reported
@@ -989,7 +989,7 @@ class App(object):
             challenge_dict = dict(
                 zip(
                     ['id', 'first_one', 'total_value', 'second_one', 'previous_value'],
-                    struct.unpack('{}HBIBI'.format(self.config.endian), data[idx : idx + 12]),
+                    struct.unpack(self.config.endian + 'HBIBI', data[idx : idx + 12]),
                 )
             )
             mydict['challenges'].append(challenge_dict)
@@ -1049,7 +1049,7 @@ class App(object):
         b = BytesIO()
         b.write(
             struct.pack(
-                f'{self.config.endian}IIH',
+                self.config.endian + 'IIH',
                 data['unknown'],
                 (len(data['challenges']) * 12) + 2,
                 len(data['challenges']),
@@ -1059,7 +1059,7 @@ class App(object):
         for challenge in save_challenges:
             b.write(
                 struct.pack(
-                    f'{self.config.endian}HBIBI',
+                    self.config.endian + 'HBIBI',
                     challenge['id'],
                     challenge['first_one'],
                     challenge['total_value'],
@@ -1104,7 +1104,7 @@ class App(object):
 
     def unwrap_player_data(self, data):
         """
-        The endianness on the few struct calls here appears to actually be
+        Byte order on the few struct calls here appears to actually be
         hardcoded regardless of platform, so we're perhaps just leaving
         them, rather than using self.config.endian as we're doing elsewhere.
         I suspect this might actually be wrong, though, and just happens to
@@ -1121,7 +1121,7 @@ class App(object):
         data = self.lzo1x_decompress(b'\xf0' + data[20:])
         size, wsg, version = struct.unpack('>I3sI', data[:11])
         if version != 2 and version != 0x02000000:
-            raise BorderlandsError('Unknown save version {}'.format(version))
+            raise BorderlandsError(f'Unknown save version {version}')
 
         if version == 2:
             crc, size = struct.unpack(">II", data[11:19])
@@ -1152,7 +1152,7 @@ class App(object):
         data = bitstream.getvalue() + b"\x00\x00\x00\x00"
 
         header = struct.pack(">I3s", len(data) + 15, b'WSG')
-        header = header + struct.pack(f"{self.config.endian}III", 2, crc, len(player))
+        header = header + struct.pack(self.config.endian + "III", 2, crc, len(player))
 
         data = self.lzo1x_1_compress(header + data)[1:]
 
@@ -1839,7 +1839,7 @@ class App(object):
             content = player.get(i)
             if content is None:
                 continue
-            print('; {}'.format(name), file=output)
+            print(f'; {name}', file=output)
             for field in content:
                 raw = self.read_protobuf(field[1])[1][0][1]
 
@@ -2028,7 +2028,7 @@ class App(object):
         parser.add_argument(
             '--level',
             type=int,
-            help='Set the character to this level (from 1 to {})'.format(self.max_level),
+            help=f'Set the character to this level (from 1 to {self.max_level})',
         )
 
         parser.add_argument(
@@ -2165,7 +2165,7 @@ class App(object):
         """
         Stupid little function to send some output to STDERR.
         """
-        print('ERROR: {}'.format(output), file=sys.stderr)
+        print(f'ERROR: {output}', file=sys.stderr)
 
     def debug(self, output):
         """

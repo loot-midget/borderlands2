@@ -2,7 +2,7 @@
 
 import sys
 import traceback
-from borderlands import version_check
+from borderlands.utils import version_check
 from borderlands.bl2 import AppBL2
 
 if __name__ == "__main__":
