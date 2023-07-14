@@ -1,5 +1,3 @@
-#! /usr/bin/env python
-
 import binascii
 from bisect import insort
 from io import BytesIO
