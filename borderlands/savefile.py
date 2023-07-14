@@ -1,16 +1,16 @@
+import argparse
+import base64
 import binascii
-from bisect import insort
-from io import BytesIO
+import copy
 import hashlib
 import json
 import math
-import argparse
+import os
 import random
 import struct
 import sys
-import os
-import copy
-import base64
+from bisect import insort
+from io import BytesIO
 
 
 class Config(argparse.Namespace):
