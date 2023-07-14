@@ -1,7 +1,5 @@
-import argparse
 import base64
 import binascii
-import copy
 import hashlib
 import json
 import math
@@ -9,8 +7,33 @@ import os
 import random
 import struct
 import sys
-from bisect import insort
+import argparse
 from io import BytesIO
+from typing import List, Tuple, Dict, Set, Any
+
+from borderlands.challenges import Challenge
+from borderlands.datautil.bitstream import ReadBitstream, WriteBitstream
+from borderlands.datautil.huffman import (
+    read_huffman_tree,
+    make_huffman_tree,
+    write_huffman_tree,
+    invert_tree,
+    huffman_decompress,
+    huffman_compress,
+)
+from borderlands.datautil.lzo1x import lzo1x_decompress, lzo1x_1_compress
+from borderlands.datautil.utils import invert_structure
+
+from borderlands.datautil.protobuf import (
+    read_protobuf_value,
+    read_repeated_protobuf_value,
+    write_repeated_protobuf_value,
+    read_protobuf,
+    apply_structure,
+    write_protobuf,
+    remove_structure,
+)
+from borderlands.datautil.utils import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 
 
 class Config(argparse.Namespace):
@@ -180,152 +203,10 @@ class BorderlandsError(Exception):
     pass
 
 
-class ReadBitstream(object):
-    def __init__(self, s):
-        self.s = s
-        self.i = 0
-
-    def read_bit(self):
-        i = self.i
-        self.i = i + 1
-        byte = self.s[i >> 3]
-        bit = byte >> (7 - (i & 7))
-        return bit & 1
-
-    def read_bits(self, n):
-        s = self.s
-        i = self.i
-        end = i + n
-        chunk = s[i >> 3 : (end + 7) >> 3]
-        value = chunk[0] & ~(0xFF00 >> (i & 7))
-        for c in chunk[1:]:
-            value = (value << 8) | c
-        if (end & 7) != 0:
-            value = value >> (8 - (end & 7))
-        self.i = end
-        return value
-
-    def read_byte(self):
-        i = self.i
-        self.i = i + 8
-        byte = self.s[i >> 3]
-        if (i & 7) == 0:
-            return byte
-        byte = (byte << 8) | self.s[(i >> 3) + 1]
-        return (byte >> (8 - (i & 7))) & 0xFF
-
-
-class WriteBitstream(object):
-    def __init__(self):
-        self.s = bytearray()
-        self.byte = 0
-        self.i = 7
-
-    def write_bit(self, b):
-        i = self.i
-        byte = self.byte | (b << i)
-        if i == 0:
-            self.s.append(byte)
-            self.byte = 0
-            self.i = 7
-        else:
-            self.byte = byte
-            self.i = i - 1
-
-    def write_bits(self, b, n):
-        s = self.s
-        byte = self.byte
-        i = self.i
-        while n >= (i + 1):
-            shift = n - (i + 1)
-            n = n - (i + 1)
-            byte = byte | (b >> shift)
-            b = b & ~(byte << shift)
-            s.append(byte)
-            byte = 0
-            i = 7
-        if n > 0:
-            byte = byte | (b << (i + 1 - n))
-            i = i - n
-        self.s = s
-        self.byte = byte
-        self.i = i
-
-    def write_byte(self, b):
-        i = self.i
-        if i == 7:
-            self.s.append(b)
-        else:
-            self.s.append(self.byte | (b >> (7 - i)))
-            self.byte = (b << (i + 1)) & 0xFF
-
-    def getvalue(self):
-        if self.i != 7:
-            ret_s = copy.copy(self.s)
-            ret_s.append(self.byte)
-            return bytes(ret_s)
-        else:
-            return bytes(self.s)
-
-
-class ChallengeCat(object):
-    """
-    Simple little class to hold information about challenge
-    categories.  Mostly just a glorified dict.
-    """
-
-    def __init__(self, name, dlc=0):
-        self.name = name
-        self.dlc = dlc
-        if self.dlc == 0:
-            self.is_from_dlc = 0
-        else:
-            self.is_from_dlc = 1
-
-
-class Challenge(object):
-    """
-    A simple little object to hold information about our non-level-specific
-    challenges.  This is *mostly* just a glorified dict.
-    """
-
-    def __init__(self, position, identifier, id_text, cat, name, description, levels, bonus=None):
-        self.position = position
-        self.identifier = identifier
-        self.id_text = id_text
-        self.cat = cat
-        self.name = name
-        self.description = description
-        self.levels = levels
-        self.bonus = bonus
-
-    def get_max(self):
-        """
-        Returns the point value for the challenge JUST before its maximum level.
-        """
-        return self.levels[-1] - 1
-
-    def get_bonus(self):
-        """
-        Returns the point value for the challenge JUST before getting the challenge's
-        bonus reward, if any.  Will return None if no bonus is present for the
-        challenge.
-        """
-        if self.bonus:
-            return self.levels[self.bonus - 1] - 1
-        else:
-            return None
-
-    def __lt__(self, other):
-        return self.id_text.lower() < other.id_text.lower()
-
-
 class App(object):
     """
     Our main application class.
     """
-
-    save_structure = None
 
     # These seem to be the same for both BL2 and BLTPS
     item_sizes = (
@@ -337,47 +218,6 @@ class App(object):
     item_header_sizes = (
         (("type", 8), ("balance", 10), ("manufacturer", 7)),
         (("type", 6), ("balance", 10), ("manufacturer", 7)),
-    )
-
-    # Ditto
-    clz_table = (
-        32,
-        0,
-        1,
-        26,
-        2,
-        23,
-        27,
-        0,
-        3,
-        16,
-        24,
-        30,
-        28,
-        11,
-        0,
-        13,
-        4,
-        7,
-        17,
-        0,
-        25,
-        22,
-        31,
-        15,
-        29,
-        10,
-        12,
-        6,
-        0,
-        21,
-        14,
-        9,
-        5,
-        20,
-        8,
-        19,
-        18,
     )
 
     min_backpack_size = 12
@@ -525,106 +365,6 @@ class App(object):
         12787955,  # lvl 80
     ]
 
-    def read_huffman_tree(self, b):
-        node_type = b.read_bit()
-        if node_type == 0:
-            return (None, (self.read_huffman_tree(b), self.read_huffman_tree(b)))
-        else:
-            return (None, b.read_byte())
-
-    def write_huffman_tree(self, node, b):
-        if type(node[1]) is int:
-            b.write_bit(1)
-            b.write_byte(node[1])
-        else:
-            b.write_bit(0)
-            self.write_huffman_tree(node[1][0], b)
-            self.write_huffman_tree(node[1][1], b)
-
-    class HuffmanNode(object):
-        """
-        This is a bit of a hack because I don't feel like rewriting `make_huffman_tree`
-        entirely.  Basically the current implementation relies on Python 2 behavior
-        where lists and ints can be compared directly with comparison operators.
-        Python 3 forbids this, so the call to `bisect.insort()` inside
-        `make_huffman_tree` fails once it encounters an "regular" two-element list
-        with two ints, and another whose second element is a nested structure.
-        Really `make_huffman_tree` should just be rewritten to be sensible, but
-        rather than doing that I'm doing this hacky thing.  C'est la vie.
-        """
-
-        def __init__(self, weight, data):
-            self.weight = weight
-            self.data = data
-
-        def __repr__(self):
-            return f'hn({self.weight}, {self.data})'
-
-        def __lt__(self, other):
-            """
-            Compare by weight, and then by data.  If the data on either
-            isn't an int, sort it after the other one (as Python 2
-            would do)
-            """
-            if self.weight != other.weight:
-                return self.weight < other.weight
-
-            if type(self.data) == int and type(other.data) == int:
-                return self.data < other.data
-            else:
-                return type(self.data) == int
-
-        def to_list(self):
-            """
-            Returns ourself as a nested collection of lists, rather than a
-            nested collection of HuffmanNodes.
-            """
-            if type(self.data) == int:
-                return [self.weight, self.data]
-            else:
-                return [self.weight, [d.to_list() for d in self.data]]
-
-    def make_huffman_tree(self, data):
-        frequencies = [0] * 256
-        for c in data:
-            frequencies[c] += 1
-
-        nodes = [self.HuffmanNode(f, i) for (i, f) in enumerate(frequencies) if f != 0]
-        nodes.sort()
-
-        while len(nodes) > 1:
-            l, r = nodes[:2]
-            nodes = nodes[2:]
-            insort(nodes, self.HuffmanNode(l.weight + r.weight, [l, r]))
-
-        return nodes[0].to_list()
-
-    def invert_tree(self, node, code=0, bits=0):
-        if type(node[1]) is int:
-            return {node[1]: (code, bits)}
-        else:
-            d = {}
-            d.update(self.invert_tree(node[1][0], code << 1, bits + 1))
-            d.update(self.invert_tree(node[1][1], (code << 1) | 1, bits + 1))
-            return d
-
-    def huffman_decompress(self, tree, bitstream, size):
-        output = bytearray()
-        while len(output) < size:
-            node = tree
-            while 1:
-                b = bitstream.read_bit()
-                node = node[1][b]
-                if type(node[1]) is int:
-                    output.append(node[1])
-                    break
-        return bytes(output)
-
-    def huffman_compress(self, encoding, data, bitstream):
-        for c in data:
-            code, nbits = encoding[c]
-            bitstream.write_bits(code, nbits)
-
     def pack_item_values(self, is_weapon, values):
         i = 0
         itembytes = bytearray(32)
@@ -660,272 +400,38 @@ class App(object):
             i = j
         return values
 
-    def rotate_data_right(self, data, steps):
-        steps = steps % len(data)
-        return data[-steps:] + data[:-steps]
-
-    def rotate_data_left(self, data, steps):
-        steps = steps % len(data)
-        return data[steps:] + data[:steps]
-
-    def xor_data(self, data, key):
-        key = key & 0xFFFFFFFF
-        output = bytearray()
-        for c in data:
-            key = (key * 279470273) % 4294967291
-            output.append((c ^ key) & 0xFF)
-        return bytes(output)
-
     def wrap_item(self, is_weapon, values, key):
         item = self.pack_item_values(is_weapon, values)
         header = struct.pack(">Bi", (is_weapon << 7) | self.item_struct_version, key)
         padding = b"\xff" * (33 - len(item))
         h = binascii.crc32(header + b"\xff\xff" + item + padding) & 0xFFFFFFFF
         checksum = struct.pack(">H", ((h >> 16) ^ h) & 0xFFFF)
-        body = self.xor_data(self.rotate_data_left(checksum + item, key & 31), key >> 5)
+        body = xor_data(rotate_data_left(checksum + item, key & 31), key >> 5)
         return header + body
 
     def unwrap_item(self, data):
         version_type, key = struct.unpack(">Bi", data[:5])
         is_weapon = version_type >> 7
-        raw = self.rotate_data_right(self.xor_data(data[5:], key >> 5), key & 31)
+        raw = rotate_data_right(xor_data(data[5:], key >> 5), key & 31)
         return is_weapon, self.unpack_item_values(is_weapon, raw[2:]), key
 
     def replace_raw_item_key(self, data, key):
         old_key = struct.unpack(">i", data[1:5])[0]
-        item = self.rotate_data_right(self.xor_data(data[5:], old_key >> 5), old_key & 31)[2:]
+        item = rotate_data_right(xor_data(data[5:], old_key >> 5), old_key & 31)[2:]
         header = struct.pack(">Bi", data[0], key)
         padding = b"\xff" * (33 - len(item))
         h = binascii.crc32(header + b"\xff\xff" + item + padding) & 0xFFFFFFFF
         checksum = struct.pack(">H", ((h >> 16) ^ h) & 0xFFFF)
-        body = self.xor_data(self.rotate_data_left(checksum + item, key & 31), key >> 5)
+        body = xor_data(rotate_data_left(checksum + item, key & 31), key >> 5)
         return header + body
 
-    def read_varint(self, f):
-        value = 0
-        offset = 0
-        while 1:
-            b = ord(f.read(1))
-            value |= (b & 0x7F) << offset
-            if (b & 0x80) == 0:
-                break
-            offset = offset + 7
-        return value
-
-    def write_varint(self, f, i):
-        while i > 0x7F:
-            f.write(bytes([0x80 | (i & 0x7F)]))
-            i = i >> 7
-        f.write(bytes([i]))
-
-    def read_protobuf(self, data):
-        fields = {}
-        end_position = len(data)
-        bytestream = BytesIO(data)
-        while bytestream.tell() < end_position:
-            key = self.read_varint(bytestream)
-            field_number = key >> 3
-            wire_type = key & 7
-            value = self.read_protobuf_value(bytestream, wire_type)
-            fields.setdefault(field_number, []).append([wire_type, value])
-        return fields
-
-    def read_protobuf_value(self, b, wire_type):
-        if wire_type == 0:
-            value = self.read_varint(b)
-        elif wire_type == 1:
-            value = struct.unpack("<Q", b.read(8))[0]
-        elif wire_type == 2:
-            length = self.read_varint(b)
-            value = b.read(length)
-        elif wire_type == 5:
-            value = struct.unpack("<I", b.read(4))[0]
-        else:
-            raise BorderlandsError("Unsupported wire type " + str(wire_type))
-        return value
-
-    def read_repeated_protobuf_value(self, data, wire_type):
-        b = BytesIO(data)
-        values = []
-        while b.tell() < len(data):
-            values.append(self.read_protobuf_value(b, wire_type))
-        return values
-
-    def write_protobuf(self, data):
-        b = BytesIO()
-        # If the data came from a JSON file the keys will all be strings
-        data = dict([(int(k), v) for (k, v) in data.items()])
-        for key, entries in sorted(data.items()):
-            for wire_type, value in entries:
-                if type(value) is dict:
-                    value = self.write_protobuf(value)
-                    wire_type = 2
-                elif type(value) in (list, tuple) and wire_type != 2:
-                    sub_b = BytesIO()
-                    for v in value:
-                        self.write_protobuf_value(sub_b, wire_type, v)
-                    value = sub_b.getvalue()
-                    wire_type = 2
-                self.write_varint(b, (key << 3) | wire_type)
-                self.write_protobuf_value(b, wire_type, value)
-        return b.getvalue()
-
-    def write_protobuf_value(self, b, wire_type, value):
-        if wire_type == 0:
-            self.write_varint(b, value)
-        elif wire_type == 1:
-            b.write(struct.pack("<Q", value))
-        elif wire_type == 2:
-            if type(value) is str:
-                value = value.encode('latin1')
-            elif type(value) is list:
-                value = "".join(map(chr, value)).encode('latin1')
-            self.write_varint(b, len(value))
-            b.write(value)
-        elif wire_type == 5:
-            b.write(struct.pack("<I", value))
-        else:
-            raise BorderlandsError("Unsupported wire type " + str(wire_type))
-
-    def write_repeated_protobuf_value(self, data, wire_type):
-        b = BytesIO()
-        for value in data:
-            self.write_protobuf_value(b, wire_type, value)
-        return b.getvalue()
-
-    def parse_zigzag(self, i):
-        if i & 1:
-            return -1 ^ (i >> 1)
-        else:
-            return i >> 1
-
-    def apply_structure(self, pbdata, s):
-        fields = {}
-        raw = {}
-        for k, data in pbdata.items():
-            mapping = s.get(k)
-            if mapping is None:
-                raw[k] = data
-                continue
-            elif type(mapping) is str:
-                fields[mapping] = data[0][1]
-                continue
-            key, repeated, child_s = mapping
-            if child_s is None:
-                values = [d[1] for d in data]
-                fields[key] = values if repeated else values[0]
-            elif type(child_s) is int:
-                if repeated:
-                    fields[key] = self.read_repeated_protobuf_value(data[0][1], child_s)
-                else:
-                    fields[key] = data[0][1]
-            elif type(child_s) is tuple:
-                values = [child_s[0](d[1]) for d in data]
-                fields[key] = values if repeated else values[0]
-            elif type(child_s) is dict:
-                values = [self.apply_structure(self.read_protobuf(d[1]), child_s) for d in data]
-                fields[key] = values if repeated else values[0]
-            else:
-                raise Exception(f"Invalid mapping {mapping!r} for {k!r}: {data!r}")
-        if len(raw) != 0:
-            fields["_raw"] = {}
-            for k, values in raw.items():
-                safe_values = []
-                for wire_type, v in values:
-                    if wire_type == 2:
-                        v = list(v)
-                    safe_values.append([wire_type, v])
-                fields["_raw"][k] = safe_values
-        return fields
-
-    def remove_structure(self, data, inv):
-        pbdata = {}
-        pbdata.update(data.get("_raw", {}))
-        for k, value in data.items():
-            if k == "_raw":
-                # Fix for Python 3 - these inner lists need to be
-                # run through wrap_bytes, else they'll be interpreted
-                # weirdly.
-                for raw_k, raw_values in value.items():
-                    for idx, (wire_type, v) in enumerate(raw_values):
-                        if wire_type == 2:
-                            raw_values[idx][1] = self.wrap_bytes(v)
-                continue
-            mapping = inv.get(k)
-            if mapping is None:
-                raise BorderlandsError(f"Unknown key {k!r} in data")
-            elif type(mapping) is int:
-                pbdata[mapping] = [[self.guess_wire_type(value), value]]
-                continue
-            key, repeated, child_inv = mapping
-            if child_inv is None:
-                value = [value] if not repeated else value
-                pbdata[key] = [[self.guess_wire_type(v), v] for v in value]
-            elif type(child_inv) is int:
-                if repeated:
-                    b = BytesIO()
-                    for v in value:
-                        self.write_protobuf_value(b, child_inv, v)
-                    pbdata[key] = [[2, b.getvalue()]]
-                else:
-                    pbdata[key] = [[child_inv, value]]
-            elif type(child_inv) is tuple:
-                if not repeated:
-                    value = [value]
-                values = []
-                for v in map(child_inv[1], value):
-                    if type(v) is list:
-                        values.append(v)
-                    else:
-                        values.append([self.guess_wire_type(v), v])
-                pbdata[key] = values
-            elif type(child_inv) is dict:
-                value = [value] if not repeated else value
-                values = []
-                for d in [self.remove_structure(v, child_inv) for v in value]:
-                    values.append([2, self.write_protobuf(d)])
-                pbdata[key] = values
-            else:
-                raise Exception(f"Invalid mapping {mapping!r} for {k!r}: {value!r}")
-        return pbdata
-
-    def guess_wire_type(self, value):
-        if isinstance(value, str) or isinstance(value, bytes):
-            return 2
-        else:
-            return 0
-
-    def invert_structure(self, structure):
-        inv = {}
-        for k, v in structure.items():
-            if type(v) is tuple:
-                if type(v[2]) is dict:
-                    inv[v[0]] = (k, v[1], self.invert_structure(v[2]))
-                else:
-                    inv[v[0]] = (k,) + v[1:]
-            else:
-                inv[v] = k
-        return inv
-
-    def unwrap_bytes(self, value):
-        return list(value)
-
-    def wrap_bytes(self, value):
-        return bytes(value)
-
-    def unwrap_float(self, v):
-        return struct.unpack("<f", struct.pack("<I", v))[0]
-
-    def wrap_float(self, v):
-        return [5, struct.unpack("<I", struct.pack("<f", v))[0]]
-
     def unwrap_black_market(self, value):
-        sdus = self.read_repeated_protobuf_value(value, 0)
+        sdus = read_repeated_protobuf_value(value, 0)
         return dict(zip(self.black_market_keys, sdus))
 
     def wrap_black_market(self, value):
         sdus = [value[k] for k in self.black_market_keys[: len(value)]]
-        return self.write_repeated_protobuf_value(sdus, 0)
+        return write_repeated_protobuf_value(sdus, 0)
 
     def unwrap_challenges(self, data):
         """
@@ -1007,25 +513,25 @@ class App(object):
         Reuse converting full player data to json
         for simpler code
         """
-        json_data = self.apply_structure(player, self.save_structure)
+        json_data = apply_structure(player, self.save_structure)
         if 'explored_areas' not in json_data:
             return []
         names = [x.decode('utf-8') for x in json_data['explored_areas']]
         return names
 
     def print_explored_levels(self, player) -> None:
-        if not self.LEVELS_TO_TRAVEL_STATION_MAP:
-            self.error(f'LEVELS_TO_TRAVEL_STATION_MAP is empty in class {self.__class__.__name__}')
+        if not self.levels_to_travel_station_map:
+            self.error(f'levels_to_travel_station_map is empty in class {self.__class__.__name__}')
             return
 
-        unique_names = set(self.LEVELS_TO_TRAVEL_STATION_MAP.keys())
+        unique_names = set(self.levels_to_travel_station_map.keys())
         explored_areas = self.get_fully_explored_areas(player)
         unexplored = set(unique_names) - set(explored_areas)
         labels = []
         for name in unexplored:
-            travel_station = self.LEVELS_TO_TRAVEL_STATION_MAP.get(name, name)
+            travel_station = self.levels_to_travel_station_map.get(name, name)
             label = f'  {travel_station} ({name})'
-            if name in self.NO_EXPLORATION_CHALLENGE_LEVELS:
+            if name in self.no_exploration_challenge_levels:
                 label += ' (does not contribute to Explorer-of-X achievement)'
             labels.append(label)
         if labels:
@@ -1116,7 +622,7 @@ class App(object):
         if data[:20] != hashlib.sha1(data[20:]).digest():
             raise BorderlandsError("Invalid save file")
 
-        data = self.lzo1x_decompress(b'\xf0' + data[20:])
+        data = lzo1x_decompress(b'\xf0' + data[20:])
         size, wsg, version = struct.unpack('>I3sI', data[:11])
         if version != 2 and version != 0x02000000:
             raise BorderlandsError(f'Unknown save version {version}')
@@ -1127,8 +633,8 @@ class App(object):
             crc, size = struct.unpack("<II", data[11:19])
 
         bitstream = ReadBitstream(data[19:])
-        tree = self.read_huffman_tree(bitstream)
-        player = self.huffman_decompress(tree, bitstream, size)
+        tree = read_huffman_tree(bitstream)
+        player = huffman_decompress(tree, bitstream, size)
 
         if (binascii.crc32(player) & 0xFFFFFFFF) != crc:
             raise BorderlandsError("CRC check failed")
@@ -1144,252 +650,17 @@ class App(object):
         crc = binascii.crc32(player) & 0xFFFFFFFF
 
         bitstream = WriteBitstream()
-        tree = self.make_huffman_tree(player)
-        self.write_huffman_tree(tree, bitstream)
-        self.huffman_compress(self.invert_tree(tree), player, bitstream)
+        tree = make_huffman_tree(player)
+        write_huffman_tree(tree, bitstream)
+        huffman_compress(invert_tree(tree), player, bitstream)
         data = bitstream.getvalue() + b"\x00\x00\x00\x00"
 
         header = struct.pack(">I3s", len(data) + 15, b'WSG')
-        header = header + struct.pack(self.config.endian + "III", 2, crc, len(player))
+        header += struct.pack(self.config.endian + "III", 2, crc, len(player))
 
-        data = self.lzo1x_1_compress(header + data)[1:]
+        data = lzo1x_1_compress(header + data)[1:]
 
         return hashlib.sha1(data).digest() + data
-
-    def expand_zeroes(self, src, ip, extra):
-        start = ip
-        while src[ip] == 0:
-            ip = ip + 1
-        v = ((ip - start) * 255) + src[ip]
-        return v + extra, ip + 1
-
-    def copy_earlier(self, b, offset, n):
-        i = len(b) - offset
-        end = i + n
-        while i < end:
-            chunk = b[i : i + n]
-            i = i + len(chunk)
-            n = n - len(chunk)
-            b.extend(chunk)
-
-    def lzo1x_decompress(self, s):
-        dst = bytearray()
-        src = bytearray(s)
-        ip = 5
-
-        t = src[ip]
-        ip += 1
-        if t > 17:
-            t = t - 17
-            dst.extend(src[ip : ip + t])
-            ip += t
-            t = src[ip]
-            ip += 1
-        elif t < 16:
-            if t == 0:
-                t, ip = self.expand_zeroes(src, ip, 15)
-            dst.extend(src[ip : ip + t + 3])
-            ip += t + 3
-            t = src[ip]
-            ip += 1
-
-        while 1:
-            while 1:
-                if t >= 64:
-                    self.copy_earlier(dst, 1 + ((t >> 2) & 7) + (src[ip] << 3), (t >> 5) + 1)
-                    ip += 1
-                elif t >= 32:
-                    count = t & 31
-                    if count == 0:
-                        count, ip = self.expand_zeroes(src, ip, 31)
-                    t = src[ip]
-                    self.copy_earlier(dst, 1 + ((t | (src[ip + 1] << 8)) >> 2), count + 2)
-                    ip += 2
-                elif t >= 16:
-                    offset = (t & 8) << 11
-                    count = t & 7
-                    if count == 0:
-                        count, ip = self.expand_zeroes(src, ip, 7)
-                    t = src[ip]
-                    offset += (t | (src[ip + 1] << 8)) >> 2
-                    ip += 2
-                    if offset == 0:
-                        return bytes(dst)
-                    self.copy_earlier(dst, offset + 0x4000, count + 2)
-                else:
-                    self.copy_earlier(dst, 1 + (t >> 2) + (src[ip] << 2), 2)
-                    ip += 1
-
-                t = t & 3
-                if t == 0:
-                    break
-                dst.extend(src[ip : ip + t])
-                ip += t
-                t = src[ip]
-                ip += 1
-
-            while 1:
-                t = src[ip]
-                ip += 1
-                if t < 16:
-                    if t == 0:
-                        t, ip = self.expand_zeroes(src, ip, 15)
-                    dst.extend(src[ip : ip + t + 3])
-                    ip += t + 3
-                    t = src[ip]
-                    ip += 1
-                if t < 16:
-                    self.copy_earlier(dst, 1 + 0x0800 + (t >> 2) + (src[ip] << 2), 3)
-                    ip += 1
-                    t = t & 3
-                    if t == 0:
-                        continue
-                    dst.extend(src[ip : ip + t])
-                    ip += t
-                    t = src[ip]
-                    ip += 1
-                break
-
-    def read_xor32(self, src, p1, p2):
-        v1 = src[p1] | (src[p1 + 1] << 8) | (src[p1 + 2] << 16) | (src[p1 + 3] << 24)
-        v2 = src[p2] | (src[p2 + 1] << 8) | (src[p2 + 2] << 16) | (src[p2 + 3] << 24)
-        return v1 ^ v2
-
-    def lzo1x_1_compress_core(self, src, dst, ti, ip_start, ip_len):
-        dict_entries = [0] * 16384
-
-        in_end = ip_start + ip_len
-        ip_end = ip_start + ip_len - 20
-
-        ip = ip_start
-        ii = ip_start
-
-        ip += (4 - ti) if ti < 4 else 0
-        ip += 1 + ((ip - ii) >> 5)
-        while 1:
-            while 1:
-                if ip >= ip_end:
-                    return in_end - (ii - ti)
-                dv = src[ip : ip + 4]
-                dindex = dv[0] | (dv[1] << 8) | (dv[2] << 16) | (dv[3] << 24)
-                dindex = ((0x1824429D * dindex) >> 18) & 0x3FFF
-                m_pos = ip_start + dict_entries[dindex]
-                dict_entries[dindex] = (ip - ip_start) & 0xFFFF
-                if dv == src[m_pos : m_pos + 4]:
-                    break
-                ip += 1 + ((ip - ii) >> 5)
-
-            ii -= ti
-            ti = 0
-            t = ip - ii
-            if t != 0:
-                if t <= 3:
-                    dst[-2] |= t
-                    dst.extend(src[ii : ii + t])
-                elif t <= 16:
-                    dst.append(t - 3)
-                    dst.extend(src[ii : ii + t])
-                else:
-                    if t <= 18:
-                        dst.append(t - 3)
-                    else:
-                        tt = t - 18
-                        dst.append(0)
-                        n, tt = divmod(tt, 255)
-                        dst.extend(b"\x00" * n)
-                        dst.append(tt)
-                    dst.extend(src[ii : ii + t])
-                    ii += t
-
-            m_len = 4
-            v = self.read_xor32(src, ip + m_len, m_pos + m_len)
-            if v == 0:
-                while 1:
-                    m_len += 4
-                    v = self.read_xor32(src, ip + m_len, m_pos + m_len)
-                    if ip + m_len >= ip_end:
-                        break
-                    elif v != 0:
-                        m_len += self.clz_table[(v & -v) % 37] >> 3
-                        break
-            else:
-                m_len += self.clz_table[(v & -v) % 37] >> 3
-
-            m_off = ip - m_pos
-            ip += m_len
-            ii = ip
-            if m_len <= 8 and m_off <= 0x0800:
-                m_off -= 1
-                dst.append(((m_len - 1) << 5) | ((m_off & 7) << 2))
-                dst.append(m_off >> 3)
-            elif m_off <= 0x4000:
-                m_off -= 1
-                if m_len <= 33:
-                    dst.append(32 | (m_len - 2))
-                else:
-                    m_len -= 33
-                    dst.append(32)
-                    n, m_len = divmod(m_len, 255)
-                    dst.extend(b"\x00" * n)
-                    dst.append(m_len)
-                dst.append((m_off << 2) & 0xFF)
-                dst.append((m_off >> 6) & 0xFF)
-            else:
-                m_off -= 0x4000
-                if m_len <= 9:
-                    dst.append(0xFF & (16 | ((m_off >> 11) & 8) | (m_len - 2)))
-                else:
-                    m_len -= 9
-                    dst.append(0xFF & (16 | ((m_off >> 11) & 8)))
-                    n, m_len = divmod(m_len, 255)
-                    dst.extend(b"\x00" * n)
-                    dst.append(m_len)
-                dst.append((m_off << 2) & 0xFF)
-                dst.append((m_off >> 6) & 0xFF)
-
-    def lzo1x_1_compress(self, s):
-        src = bytearray(s)
-        dst = bytearray()
-
-        ip = 0
-        l = len(s)
-        t = 0
-
-        dst.append(240)
-        dst.append((l >> 24) & 0xFF)
-        dst.append((l >> 16) & 0xFF)
-        dst.append((l >> 8) & 0xFF)
-        dst.append(l & 0xFF)
-
-        while l > 20 and t + l > 31:
-            ll = min(49152, l)
-            t = self.lzo1x_1_compress_core(src, dst, t, ip, ll)
-            ip += ll
-            l -= ll
-        t += l
-
-        if t > 0:
-            ii = len(s) - t
-
-            if len(dst) == 5 and t <= 238:
-                dst.append(17 + t)
-            elif t <= 3:
-                dst[-2] |= t
-            elif t <= 18:
-                dst.append(t - 3)
-            else:
-                tt = t - 18
-                dst.append(0)
-                n, tt = divmod(tt, 255)
-                dst.extend(b"\x00" * n)
-                dst.append(tt)
-            dst.extend(src[ii : ii + t])
-
-        dst.append(16 | 1)
-        dst.append(0)
-        dst.append(0)
-
-        return bytes(dst)
 
     def show_save_info(self, data):
         """
@@ -1401,13 +672,13 @@ class App(object):
         that.  Inefficiency!
         """
 
-        player = self.read_protobuf(self.unwrap_player_data(data))
+        player = read_protobuf(self.unwrap_player_data(data))
         config = self.config
 
         if config.print_unexplored_levels:
             self.print_explored_levels(player)
 
-    def modify_save(self, data, input_filename=None):
+    def modify_save(self, data):
         """
         Performs a set of modifications on file data, based on our
         config object.  "data" should be the raw data from a save
@@ -1418,7 +689,7 @@ class App(object):
         that.  Inefficiency!
         """
 
-        player = self.read_protobuf(self.unwrap_player_data(data))
+        player = read_protobuf(self.unwrap_player_data(data))
         save_structure = self.save_structure
         config = self.config
 
@@ -1444,7 +715,7 @@ class App(object):
             b = BytesIO(raw)
             values = []
             while b.tell() < len(raw):
-                values.append(self.read_protobuf_value(b, 0))
+                values.append(read_protobuf_value(b, 0))
             if config.money is not None:
                 self.debug(f' - Setting available money to {config.money}')
                 values[0] = config.money
@@ -1475,12 +746,12 @@ class App(object):
                 self.debug(f' - Setting all items to character level ({level})')
             for field_number in (53, 54):
                 for field in player[field_number]:
-                    field_data = self.read_protobuf(field[1])
+                    field_data = read_protobuf(field[1])
                     is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
                     if config.forceitemlevels or item[4] > 1:
                         item = item[:4] + [level, level] + item[6:]
                         field_data[1][0][1] = self.wrap_item(is_weapon, item, key)
-                        field[1] = self.write_protobuf(field_data)
+                        field[1] = write_protobuf(field_data)
                     else:
                         if item[4] == 1 and not seen_level_1_warning:
                             seen_level_1_warning = True
@@ -1511,7 +782,7 @@ class App(object):
                     config.unlock['uvhm'] = True
                     self.debug('   - Also unlocking UVHM mode')
             for field in player[53]:
-                field_data = self.read_protobuf(field[1])
+                field_data = read_protobuf(field[1])
                 if 2 in field_data:
                     is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
                     if item[0] == 255 and not any([val != 0 for val in item[1:]]):
@@ -1519,7 +790,7 @@ class App(object):
                         # An ID of 4 is the one we're after
                         if idnum == 4:
                             field_data[2][0][1] = new_field_data
-                            field[1] = self.write_protobuf(field_data)
+                            field[1] = write_protobuf(field_data)
                             set_op_level = True
                             break
             if not set_op_level:
@@ -1539,7 +810,7 @@ class App(object):
                 entry[2] = [[0, new_field_data]]
                 entry[3] = [[0, 0]]
                 entry[4] = [[0, 0]]
-                player[53].append([2, self.write_protobuf(entry)])
+                player[53].append([2, write_protobuf(entry)])
 
         if config.backpack is not None:
             self.debug(f' - Setting backpack size to {config.backpack}')
@@ -1549,11 +820,11 @@ class App(object):
             new_size = self.min_backpack_size + (sdus * 3)
             if size != new_size:
                 self.debug(f'   - Resetting backpack size to {new_size} to match SDU count')
-            slots = self.read_protobuf(player[13][0][1])
+            slots = read_protobuf(player[13][0][1])
             slots[1][0][1] = new_size
-            player[13][0][1] = self.write_protobuf(slots)
-            s = self.read_repeated_protobuf_value(player[36][0][1], 0)
-            player[36][0][1] = self.write_repeated_protobuf_value(s[:7] + [sdus] + s[8:], 0)
+            player[13][0][1] = write_protobuf(slots)
+            s = read_repeated_protobuf_value(player[36][0][1], 0)
+            player[36][0][1] = write_repeated_protobuf_value(s[:7] + [sdus] + s[8:], 0)
 
         if config.bank is not None:
             self.debug(f' - Setting bank size to {config.bank}')
@@ -1567,19 +838,19 @@ class App(object):
                 player[56][0][1] = new_size
             else:
                 player[56] = [[0, new_size]]
-            s = self.read_repeated_protobuf_value(player[36][0][1], 0)
+            s = read_repeated_protobuf_value(player[36][0][1], 0)
             if len(s) < 9:
                 s = s + (9 - len(s)) * [0]
-            player[36][0][1] = self.write_repeated_protobuf_value(s[:8] + [sdus] + s[9:], 0)
+            player[36][0][1] = write_repeated_protobuf_value(s[:8] + [sdus] + s[9:], 0)
 
         if config.gunslots is not None:
             self.debug(f' - Setting available gun slots to {config.gunslots}')
             n = config.gunslots
-            slots = self.read_protobuf(player[13][0][1])
+            slots = read_protobuf(player[13][0][1])
             slots[2][0][1] = n
             if slots[3][0][1] > n - 2:
                 slots[3][0][1] = n - 2
-            player[13][0][1] = self.write_protobuf(slots)
+            player[13][0][1] = write_protobuf(slots)
 
         if config.copy_nvhm_missions:
             self.debug(' - Copying NVHM mission status to TVHM+UVHM')
@@ -1648,7 +919,7 @@ class App(object):
         #         )
         #     )
 
-        if len(config.unlock) > 0:
+        if config.unlock:
             if 'slaughterdome' in config.unlock:
                 unlocked, notifications = b'', b''
                 if 23 in player:
@@ -1672,10 +943,8 @@ class App(object):
                     player[7][0][1] = 1
             if 'challenges' in config.unlock:
                 self.debug(' - Unlocking all non-level-specific challenges')
-                challenge_unlocks = [
-                    self.apply_structure(self.read_protobuf(d[1]), save_structure[38][2]) for d in player[38]
-                ]
-                inverted_structure = self.invert_structure(save_structure[38][2])
+                challenge_unlocks = [apply_structure(read_protobuf(d[1]), save_structure[38][2]) for d in player[38]]
+                inverted_structure = invert_structure(save_structure[38][2])
                 seen_challenges = {}
                 for unlock in challenge_unlocks:
                     seen_challenges[unlock['name'].decode('latin1')] = True
@@ -1684,8 +953,8 @@ class App(object):
                         player[38].append(
                             [
                                 2,
-                                self.write_protobuf(
-                                    self.remove_structure(
+                                write_protobuf(
+                                    remove_structure(
                                         dict(
                                             [
                                                 ('dlc_id', challenge.cat.dlc),
@@ -1700,11 +969,11 @@ class App(object):
                         )
             if 'ammo' in config.unlock:
                 self.debug(' - Unlocking ammo capacity')
-                s = self.read_repeated_protobuf_value(player[36][0][1], 0)
+                s = read_repeated_protobuf_value(player[36][0][1], 0)
                 for idx, (key, value) in enumerate(zip(self.black_market_keys, s)):
                     if key in self.black_market_ammo:
                         s[idx] = 7
-                player[36][0][1] = self.write_repeated_protobuf_value(s, 0)
+                player[36][0][1] = write_repeated_protobuf_value(s, 0)
 
         # This should always come after the ammo-unlock section, since our
         # max ammo will change if more black market SDUs are unlocked.
@@ -1712,7 +981,7 @@ class App(object):
             self.debug(' - Setting ammo pools to maximum')
 
             # First we've gotta figure out our black market levels
-            s = self.read_repeated_protobuf_value(player[36][0][1], 0)
+            s = read_repeated_protobuf_value(player[36][0][1], 0)
             bm_levels = dict(zip(self.black_market_keys, s))
 
             # Make a dict of what our max ammo is for each of our black market
@@ -1728,10 +997,10 @@ class App(object):
 
             # Now loop through our 'resources' structure and modify to
             # suit, updating 'amount' and 'level' as we go.
-            inverted_structure = self.invert_structure(save_structure[11][2])
+            inverted_structure = invert_structure(save_structure[11][2])
             seen_ammo = {}
             for idx, protobuf in enumerate(player[11]):
-                data = self.apply_structure(self.read_protobuf(protobuf[1]), save_structure[11][2])
+                data = apply_structure(read_protobuf(protobuf[1]), save_structure[11][2])
                 resource = data['resource'].decode('latin1')
                 if resource in self.ammo_resource_lookup:
                     ammo_type = self.ammo_resource_lookup[resource]
@@ -1742,7 +1011,7 @@ class App(object):
                         data['amount'] = float(max_ammo[ammo_type][1])
 
                         # And now convert back into a protobuf
-                        player[11][idx][1] = self.write_protobuf(self.remove_structure(data, inverted_structure))
+                        player[11][idx][1] = write_protobuf(remove_structure(data, inverted_structure))
 
                     else:
                         self.error(f'Ammo type "{ammo_type}" / pool "{data["pool"]}" not found!')
@@ -1759,7 +1028,7 @@ class App(object):
                         'level': max_ammo[ammo_type][0],
                         'amount': float(max_ammo[ammo_type][1]),
                     }
-                    player[11].append([2, self.write_protobuf(self.remove_structure(new_struct, inverted_structure))])
+                    player[11].append([2, write_protobuf(remove_structure(new_struct, inverted_structure))])
 
         if len(config.challenges) > 0:
             data = self.unwrap_challenges(player[15][0][1])
@@ -1813,24 +1082,22 @@ class App(object):
 
         if config.name is not None and len(config.name) > 0:
             self.debug(f' - Setting character name to "{config.name}"')
-            data = self.apply_structure(self.read_protobuf(player[19][0][1]), save_structure[19][2])
+            data = apply_structure(read_protobuf(player[19][0][1]), save_structure[19][2])
             data['name'] = config.name
-            player[19][0][1] = self.write_protobuf(
-                self.remove_structure(data, self.invert_structure(save_structure[19][2]))
-            )
+            player[19][0][1] = write_protobuf(remove_structure(data, invert_structure(save_structure[19][2])))
 
         if config.save_game_id is not None and config.save_game_id > 0:
             self.debug(f' - Setting save slot ID to {config.save_game_id}')
             player[20][0][1] = config.save_game_id
 
-        return self.wrap_player_data(self.write_protobuf(player))
+        return self.wrap_player_data(write_protobuf(player))
 
     def export_items(self, data, output):
         """
         Exports items stored in savegame data 'data' to the open
         filehandle 'output'
         """
-        player = self.read_protobuf(self.unwrap_player_data(data))
+        player = read_protobuf(self.unwrap_player_data(data))
         skipped_count = 0
         for i, name in ((41, "Bank"), (53, "Items"), (54, "Weapons")):
             count = 0
@@ -1839,7 +1106,7 @@ class App(object):
                 continue
             print(f'; {name}', file=output)
             for field in content:
-                raw = self.read_protobuf(field[1])[1][0][1]
+                raw = read_protobuf(field[1])[1][0][1]
 
                 # Borderlands uses some sort-of "fake" items to store some DLC
                 # data.  As per the Gibbed sourcecode, this includes:
@@ -1873,7 +1140,7 @@ class App(object):
         Imports items into savegame data "data" based on the passed-in
         item list in "codelist"
         """
-        player = self.read_protobuf(self.unwrap_player_data(data))
+        player = read_protobuf(self.unwrap_player_data(data))
 
         prefix_length = len(self.item_prefix) + 1
 
@@ -1915,20 +1182,89 @@ class App(object):
                 field = 54
                 entry = {1: [[2, raw]], 2: [[0, 0]], 3: [[0, 1]]}
 
-            player.setdefault(field, []).append([2, self.write_protobuf(entry)])
+            player.setdefault(field, []).append([2, write_protobuf(entry)])
 
         self.debug(f' - Bank imported: {bank_count}')
         self.debug(f' - Items imported: {item_count}')
         self.debug(f' - Weapons imported: {weapon_count}')
 
-        return self.wrap_player_data(self.write_protobuf(player))
+        return self.wrap_player_data(write_protobuf(player))
 
-    def __init__(self, args):
+    def __init__(
+        self,
+        *,
+        args: List[str],
+        item_struct_version: int,
+        game_name: str,
+        item_prefix: str,
+        max_level: int,
+        black_market_keys: Tuple[str, ...],
+        black_market_ammo: Dict[str, List[int]],
+        unlock_choices: List[str],
+        levels_to_travel_station_map: Dict[str, str],
+        no_exploration_challenge_levels: Set[str],
+        challenges: Dict[int, Challenge],
+        save_structure: Dict[int, Any],
+    ) -> None:
         """
         Constructor.  Parses arguments and sets up our save_structure
         struct.
         """
+        # B2 version is 7, TPS version is 10
+        # "version" taken from what Gibbed calls it, not sure if that's
+        # an appropriate descriptor or not.
+        self.item_struct_version = item_struct_version
 
+        self.game_name = game_name
+
+        # Item export/import prefix
+        self.item_prefix = item_prefix
+
+        # Max char level
+        self.max_level = max_level
+
+        # The only difference here is that BLTPS has "laser"
+        self.black_market_keys = black_market_keys
+
+        # Dict to tell us which black market keys are ammo-related, and
+        # what the max ammo is at each level.  Could be computed pretty
+        # easily, but we may as well just store it.
+        self.black_market_ammo = black_market_ammo
+
+        # Available choices for --unlock option
+        self.unlock_choices = unlock_choices
+
+        # Level-to-Name Mapping
+        self.levels_to_travel_station_map = levels_to_travel_station_map
+
+        # Maps which don't actually contribute to the "Explorer-of-X" achievements
+        self.no_exploration_challenge_levels = no_exploration_challenge_levels
+
+        # There are two possible ways of uniquely identifying challenges in this file:
+        # via their numeric position in the list, or by what looks like an internal
+        # ID (though that ID is constructed a little weirdly, so I'm not sure if it's
+        # actually intended to be used that way or not).
+        #
+        # I did run some tests, and it looks like internally, B2 probably does use
+        # that ID field to identify the challenges...  You can mess around with the
+        # order in which they're saved to the file, but so long as the ID field
+        # is still pointing to the challenge you want, it'll be read in properly
+        # (and then when you save your game, they'll be written back out in the
+        # original order).
+        #
+        # Given that, I decided to go ahead and use that probably-ID field as the
+        # index on this dict, rather than the order.  That should be slightly more
+        # flexible for anyone editing the JSON directly, and theoretically
+        # shouldn't be a problem in the future since there won't be any new major
+        # DLC for B2...
+        #
+        # New major DLC for TPS seems unlikely too, though time will tell.
+        self.challenges = challenges
+
+        # Sets up our main save_structure var which controls how we read the file
+        self.save_structure = save_structure
+
+        # ====
         # Set up a reverse lookup for our ammo pools
         self.ammo_resource_lookup = {}
         for shortname, (resource, pool) in self.ammo_resources.items():
@@ -1940,11 +1276,15 @@ class App(object):
         # This is implemented in AppBL2 and AppBLTPS
         self.setup_save_structure()
 
-    def setup_game_specific_args(self, parser):
+    def setup_save_structure(self) -> None:
+        raise NotImplementedError()
+
+    def setup_game_specific_args(self, parser) -> None:
         """
         Function to add game-specific arguments.  By default it does nothing,
         must be overridden
         """
+        pass
 
     def parse_args(self, argv):
         """
@@ -2153,45 +1493,24 @@ class App(object):
             if config.output == 'none':
                 parser.error("Output filename specified but with `none` output")
 
-    def notice(self, output):
+    def notice(self, message) -> None:
         """
         Stupid little function to send some output to STDERR.
         """
-        print(output, file=sys.stderr)
+        print(message)
 
-    def error(self, output):
+    def error(self, message: str) -> None:
         """
         Stupid little function to send some output to STDERR.
         """
-        print(f'ERROR: {output}', file=sys.stderr)
+        print(f'ERROR: {message}', file=sys.stderr)
 
-    def debug(self, output):
+    def debug(self, message: str) -> None:
         """
         Stupid little function to send some output to STDERR.
         """
         if self.config.verbose:
-            print(output, file=sys.stderr)
-
-    def conv_binary_to_str(self, data):
-        """
-        In Python 2, we can dump to a JSON object directly, but Python 3
-        doesn't like that some of the data is binary (since that's invalid in
-        JSON).  Python 2 would just cast those as strings automatically.
-        So this will loop through and convert everything that's binary
-        into a string.
-        """
-        if type(data) == bytes:
-            return data.decode('latin1')
-        elif type(data) == dict:
-            for key in data.keys():
-                data[key] = self.conv_binary_to_str(data[key])
-            return data
-        elif type(data) == list:
-            for idx in range(len(data)):
-                data[idx] = self.conv_binary_to_str(data[idx])
-            return data
-        else:
-            return data
+            self.notice(message)
 
     def run(self):
         """
@@ -2222,8 +1541,8 @@ class App(object):
             data = json.loads(save_data)
             if '1' not in data:
                 # This means the file had been output as 'json'
-                data = self.remove_structure(data, self.invert_structure(self.save_structure))
-            save_data = self.wrap_player_data(self.write_protobuf(data))
+                data = remove_structure(data, invert_structure(self.save_structure))
+            save_data = self.wrap_player_data(write_protobuf(data))
 
         # If we've been told to import items, do so.
         if config.import_items:
@@ -2235,7 +1554,7 @@ class App(object):
         # Now perform any changes, if requested
         if config.changes:
             self.debug('Performing requested changes')
-            save_data = self.modify_save(save_data, config.input_filename)
+            save_data = self.modify_save(save_data)
 
         # Show information if we've been passed any of those args
         if config.show_info:
@@ -2296,11 +1615,11 @@ class App(object):
                 player = self.unwrap_player_data(save_data)
                 if config.output == 'decodedjson' or config.output == 'json':
                     self.debug('Converting to JSON for more human-readable output')
-                    data = self.read_protobuf(player)
+                    data = read_protobuf(player)
                     if config.output == 'json':
                         self.debug('Parsing protobuf data for even more human-readable output')
-                        data = self.apply_structure(data, self.save_structure)
-                    player = json.dumps(self.conv_binary_to_str(data), sort_keys=True, indent=4)
+                        data = apply_structure(data, self.save_structure)
+                    player = json.dumps(conv_binary_to_str(data), sort_keys=True, indent=4)
                 self.debug('Writing decoded savegame file')
                 output_file.write(player)
 
@@ -2311,3 +1630,7 @@ class App(object):
         # ... aaand we're done.
         self.debug('')
         self.debug('Done!')
+
+    @staticmethod
+    def setup_currency_args(parser) -> None:
+        raise NotImplementedError()
