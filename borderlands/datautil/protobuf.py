@@ -1,6 +1,6 @@
+import io
 import struct
-from io import BytesIO
-from typing import Dict
+from typing import Dict, Any
 
 from borderlands.datautil.common import wrap_bytes, guess_wire_type
 from borderlands.datautil.errors import BorderlandsError
@@ -8,9 +8,9 @@ from borderlands.datautil.errors import BorderlandsError
 PlayerDict = Dict[int, list]
 
 
-def remove_structure(data: dict, inv) -> dict:
-    pbdata = {}
-    pbdata.update(data.get("_raw", {}))
+def remove_structure(data: dict, inv: dict) -> dict:
+    result = {}
+    result.update(data.get("_raw", {}))
     for k, value in data.items():
         if k == "_raw":
             # Fix for Python 3 - these inner lists need to be
@@ -25,20 +25,20 @@ def remove_structure(data: dict, inv) -> dict:
         if mapping is None:
             raise BorderlandsError(f"Unknown key {k!r} in data")
         elif isinstance(mapping, int):
-            pbdata[mapping] = [[guess_wire_type(value), value]]
+            result[mapping] = [[guess_wire_type(value), value]]
             continue
         key, repeated, child_inv = mapping
         if child_inv is None:
             value = [value] if not repeated else value
-            pbdata[key] = [[guess_wire_type(v), v] for v in value]
+            result[key] = [[guess_wire_type(v), v] for v in value]
         elif isinstance(child_inv, int):
             if repeated:
-                b = BytesIO()
+                b = io.BytesIO()
                 for v in value:
-                    write_protobuf_value(b, child_inv, v)
-                pbdata[key] = [[2, b.getvalue()]]
+                    write_protobuf_value(b=b, wire_type=child_inv, value=v)
+                result[key] = [[2, b.getvalue()]]
             else:
-                pbdata[key] = [[child_inv, value]]
+                result[key] = [[child_inv, value]]
         elif isinstance(child_inv, tuple):
             if not repeated:
                 value = [value]
@@ -48,19 +48,19 @@ def remove_structure(data: dict, inv) -> dict:
                     values.append(v)
                 else:
                     values.append([guess_wire_type(v), v])
-            pbdata[key] = values
+            result[key] = values
         elif isinstance(child_inv, dict):
             value = [value] if not repeated else value
             values = []
             for d in [remove_structure(v, child_inv) for v in value]:
                 values.append([2, write_protobuf(d)])
-            pbdata[key] = values
+            result[key] = values
         else:
             raise Exception(f"Invalid mapping {mapping!r} for {k!r}: {value!r}")
-    return pbdata
+    return result
 
 
-def read_varint(f):
+def read_varint(f: io.BytesIO) -> int:
     value = 0
     offset = 0
     while True:
@@ -72,14 +72,14 @@ def read_varint(f):
     return value
 
 
-def write_varint(f, i):
+def write_varint(f: io.BytesIO, i: int) -> None:
     while i > 0x7F:
         f.write(bytes([0x80 | (i & 0x7F)]))
         i = i >> 7
     f.write(bytes([i]))
 
 
-def read_protobuf_value(b, wire_type):
+def read_protobuf_value(b: io.BytesIO, wire_type: int) -> Any:
     if wire_type == 0:
         value = read_varint(b)
     elif wire_type == 1:
@@ -94,15 +94,15 @@ def read_protobuf_value(b, wire_type):
     return value
 
 
-def read_repeated_protobuf_value(data, wire_type) -> list:
-    b = BytesIO(data)
+def read_repeated_protobuf_value(data: bytes, wire_type: int) -> list:
+    b = io.BytesIO(data)
     values = []
     while b.tell() < len(data):
         values.append(read_protobuf_value(b, wire_type))
     return values
 
 
-def write_protobuf_value(b, wire_type, value):
+def write_protobuf_value(*, b: io.BytesIO, wire_type: int, value: Any) -> None:
     if wire_type == 0:
         write_varint(b, value)
     elif wire_type == 1:
@@ -117,20 +117,20 @@ def write_protobuf_value(b, wire_type, value):
     elif wire_type == 5:
         b.write(struct.pack("<I", value))
     else:
-        raise BorderlandsError("Unsupported wire type " + str(wire_type))
+        raise BorderlandsError(f"Unsupported wire type {wire_type}")
 
 
-def write_repeated_protobuf_value(data, wire_type):
-    b = BytesIO()
+def write_repeated_protobuf_value(data: list, wire_type: int) -> bytes:
+    b = io.BytesIO()
     for value in data:
-        write_protobuf_value(b, wire_type, value)
+        write_protobuf_value(b=b, wire_type=wire_type, value=value)
     return b.getvalue()
 
 
 def read_protobuf(data: bytes) -> PlayerDict:
     fields = {}
     end_position = len(data)
-    bytestream = BytesIO(data)
+    bytestream = io.BytesIO(data)
     while bytestream.tell() < end_position:
         key = read_varint(bytestream)
         field_number = key >> 3
@@ -180,21 +180,21 @@ def apply_structure(pb_data: PlayerDict, s: dict) -> dict:
     return fields
 
 
-def write_protobuf(data):
-    b = BytesIO()
+def write_protobuf(data: dict) -> bytes:
+    b = io.BytesIO()
     # If the data came from a JSON file the keys will all be strings
-    data = dict([(int(k), v) for (k, v) in data.items()])
+    data = {int(k): v for k, v in data.items()}
     for key, entries in sorted(data.items()):
         for wire_type, value in entries:
             if isinstance(value, dict):
                 value = write_protobuf(value)
                 wire_type = 2
             elif isinstance(value, (list, tuple)) and wire_type != 2:
-                sub_b = BytesIO()
+                sub_b = io.BytesIO()
                 for v in value:
-                    write_protobuf_value(sub_b, wire_type, v)
+                    write_protobuf_value(b=sub_b, wire_type=wire_type, value=v)
                 value = sub_b.getvalue()
                 wire_type = 2
             write_varint(b, (key << 3) | wire_type)
-            write_protobuf_value(b, wire_type, value)
+            write_protobuf_value(b=b, wire_type=wire_type, value=value)
     return b.getvalue()

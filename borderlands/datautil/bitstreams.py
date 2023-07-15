@@ -26,7 +26,7 @@ class ReadBitstream:
         self.i = end
         return value
 
-    def read_byte(self):
+    def read_byte(self) -> int:
         i = self.i
         self.i = i + 8
         byte = self.s[i >> 3]

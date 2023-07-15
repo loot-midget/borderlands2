@@ -163,7 +163,11 @@ class Config(argparse.Namespace):
             self.show_info = True
 
         # Can't read/write to the same file
-        if os.path.abspath(self.input_filename) == os.path.abspath(self.output_filename) and self.input_filename != '-':
+        if (
+            self.output_filename is not None
+            and self.input_filename != '-'
+            and os.path.abspath(self.input_filename) == os.path.abspath(self.output_filename)
+        ):
             parser.error('input_filename and output_filename cannot be the same file')
 
         # If the user specified --level, make sure it's from 1 to 80
@@ -371,25 +375,25 @@ class BaseApp:
         12787955,  # lvl 80
     ]
 
-    def pack_item_values(self, is_weapon, values):
+    def pack_item_values(self, is_weapon: int, values: list) -> bytes:
         i = 0
-        itembytes = bytearray(32)
+        item_bytes = bytearray(32)
         for value, size in zip(values, self.item_sizes[is_weapon]):
             if value is None:
                 break
             j = i >> 3
             value = value << (i & 7)
             while value != 0:
-                itembytes[j] |= value & 0xFF
+                item_bytes[j] |= value & 0xFF
                 value = value >> 8
                 j = j + 1
             i = i + size
         if (i & 7) != 0:
             value = 0xFF << (i & 7)
-            itembytes[i >> 3] |= value & 0xFF
-        return bytes(itembytes[: (i + 7) >> 3])
+            item_bytes[i >> 3] |= value & 0xFF
+        return bytes(item_bytes[: (i + 7) >> 3])
 
-    def unpack_item_values(self, is_weapon, data):
+    def unpack_item_values(self, is_weapon: int, data: bytes) -> List[Optional[int]]:
         i = 8
         data = b' ' + data
         values = []
@@ -406,7 +410,7 @@ class BaseApp:
             i = j
         return values
 
-    def wrap_item(self, is_weapon, values, key):
+    def wrap_item(self, is_weapon: int, values: list, key: int) -> bytes:
         item = self.pack_item_values(is_weapon, values)
         header = struct.pack(">Bi", (is_weapon << 7) | self.item_struct_version, key)
         padding = b"\xff" * (33 - len(item))
@@ -415,17 +419,18 @@ class BaseApp:
         body = xor_data(rotate_data_left(checksum + item, key & 31), key >> 5)
         return header + body
 
-    def unwrap_item(self, data):
+    def unwrap_item(self, data: PlayerDict) -> Tuple[int, List[Optional[int]], int]:
         version_type, key = struct.unpack(">Bi", data[:5])
         is_weapon = version_type >> 7
         raw = rotate_data_right(xor_data(data[5:], key >> 5), key & 31)
         return is_weapon, self.unpack_item_values(is_weapon, raw[2:]), key
 
-    def unwrap_black_market(self, value):
+    def unwrap_black_market(self, value: bytes) -> dict:
         sdu_list = read_repeated_protobuf_value(value, 0)
+        assert len(self.black_market_keys) == len(sdu_list)
         return dict(zip(self.black_market_keys, sdu_list))
 
-    def wrap_black_market(self, value):
+    def wrap_black_market(self, value: dict) -> bytes:
         sdu_list = [value[k] for k in self.black_market_keys[: len(value)]]
         return write_repeated_protobuf_value(sdu_list, 0)
 
@@ -960,13 +965,11 @@ class BaseApp:
                                 2,
                                 write_protobuf(
                                     remove_structure(
-                                        dict(
-                                            [
-                                                ('dlc_id', challenge.category.dlc),
-                                                ('is_from_dlc', challenge.category.is_from_dlc),
-                                                ('name', challenge.id_text),
-                                            ]
-                                        ),
+                                        {
+                                            'dlc_id': challenge.category.dlc,
+                                            'is_from_dlc': challenge.category.is_from_dlc,
+                                            'name': challenge.id_text,
+                                        },
                                         inverted_structure,
                                     )
                                 ),
@@ -985,8 +988,9 @@ class BaseApp:
         if self.config.maxammo is not None:
             self.debug(' - Setting ammo pools to maximum')
 
-            # First we've gotta figure out our black market levels
+            # First we got a figure out our black market levels
             s = read_repeated_protobuf_value(player[36][0][1], 0)
+            assert len(self.black_market_keys) == len(s)
             bm_levels = dict(zip(self.black_market_keys, s))
 
             # Make a dict of what our max ammo is for each of our black market
@@ -1108,7 +1112,7 @@ class BaseApp:
                 continue
             print(f'; {name}', file=output)
             for field in content:
-                raw = read_protobuf(field[1])[1][0][1]
+                raw: PlayerDict = read_protobuf(field[1])[1][0][1]
 
                 # Borderlands uses some sort-of "fake" items to store some DLC
                 # data.  As per the Gibbed sourcecode, this includes:

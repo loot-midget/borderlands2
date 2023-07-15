@@ -1,25 +1,27 @@
 import binascii
 import struct
-from typing import Any
+from typing import Any, Tuple, Union, List
+
+from borderlands.datautil.protobuf import PlayerDict
 
 
-def wrap_float(v):
+def wrap_float(v: float) -> List[Union[int, Any]]:
     return [5, struct.unpack("<I", struct.pack("<f", v))[0]]
 
 
-def unwrap_float(v):
+def unwrap_float(v: Any) -> float:
     return struct.unpack("<f", struct.pack("<I", v))[0]
 
 
-def unwrap_bytes(value):
+def unwrap_bytes(value: bytes) -> list:
     return list(value)
 
 
-def wrap_bytes(value):
+def wrap_bytes(value: list) -> bytes:
     return bytes(value)
 
 
-def guess_wire_type(value):
+def guess_wire_type(value: Any) -> int:
     if isinstance(value, (str, bytes)):
         return 2
     else:
@@ -57,17 +59,17 @@ def conv_binary_to_str(data: Any) -> Any:
         return data
 
 
-def rotate_data_right(data, steps):
+def rotate_data_right(data: bytes, steps: int) -> bytes:
     steps = steps % len(data)
     return data[-steps:] + data[:-steps]
 
 
-def rotate_data_left(data, steps):
+def rotate_data_left(data: bytes, steps: int) -> bytes:
     steps = steps % len(data)
     return data[steps:] + data[:steps]
 
 
-def xor_data(data, key):
+def xor_data(data, key: int) -> bytes:
     key = key & 0xFFFFFFFF
     output = bytearray()
     for c in data:
@@ -76,7 +78,7 @@ def xor_data(data, key):
     return bytes(output)
 
 
-def replace_raw_item_key(data, key):
+def replace_raw_item_key(data: PlayerDict, key: int) -> bytes:
     old_key = struct.unpack(">i", data[1:5])[0]
     item = rotate_data_right(xor_data(data[5:], old_key >> 5), old_key & 31)[2:]
     header = struct.pack(">Bi", data[0], key)
