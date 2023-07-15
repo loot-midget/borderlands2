@@ -1,3 +1,4 @@
+import argparse
 import base64
 import binascii
 import hashlib
@@ -7,12 +8,13 @@ import os
 import random
 import struct
 import sys
-import argparse
 from io import BytesIO
 from typing import List, Tuple, Dict, Set, Any
 
 from borderlands.challenges import Challenge
 from borderlands.datautil.bitstream import ReadBitstream, WriteBitstream
+from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
+from borderlands.datautil.common import invert_structure, replace_raw_item_key
 from borderlands.datautil.errors import BorderlandsError
 from borderlands.datautil.huffman import (
     read_huffman_tree,
@@ -23,8 +25,6 @@ from borderlands.datautil.huffman import (
     huffman_compress,
 )
 from borderlands.datautil.lzo1x import lzo1x_decompress, lzo1x_1_compress
-from borderlands.datautil.common import invert_structure, replace_raw_item_key
-
 from borderlands.datautil.protobuf import (
     read_protobuf_value,
     read_repeated_protobuf_value,
@@ -35,7 +35,6 @@ from borderlands.datautil.protobuf import (
     remove_structure,
     PlayerDict,
 )
-from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 
 
 class Config(argparse.Namespace):

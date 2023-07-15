@@ -2,8 +2,8 @@ import struct
 from io import BytesIO
 from typing import Dict
 
-from borderlands.datautil.errors import BorderlandsError
 from borderlands.datautil.common import wrap_bytes, guess_wire_type
+from borderlands.datautil.errors import BorderlandsError
 
 PlayerDict = Dict[int, list]
 

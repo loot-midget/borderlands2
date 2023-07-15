@@ -3,8 +3,8 @@
 NOTE: cleanup tests code
 """
 import os
-import sys
 import subprocess
+import sys
 from typing import Optional
 
 
