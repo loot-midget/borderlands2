@@ -2,10 +2,13 @@
 
 import sys
 import traceback
+from typing import List
 
 from borderlands.bl2 import AppBL2
 from borderlands.bltps import AppTPS
-from borderlands.utils import python_version_check
+
+MIN_PYTHON = (3, 9)
+
 
 ERROR_TEMPLATE = """
 Something went wrong, but please ensure you have the latest
@@ -17,7 +20,15 @@ Arguments: {}
 """
 
 
-def run(game_name: str) -> None:
+def python_version_check():
+    if sys.version_info < MIN_PYTHON:
+        sys.exit(
+            f'ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} is required to run this utility'
+            + f' but you use {sys.version_info[0]}.{sys.version_info[1]}'
+        )
+
+
+def run(*, game_name: str, args: List[str]) -> None:
     python_version_check()
 
     if game_name == 'BL2':
@@ -29,9 +40,9 @@ def run(game_name: str) -> None:
 
     # noinspection PyBroadException
     try:
-        app = app_class(sys.argv[1:])
+        app = app_class(args)
         app.run()
     except Exception:
-        print(ERROR_TEMPLATE.format(repr(sys.argv[1:])), file=sys.stderr)
+        print(ERROR_TEMPLATE.format(repr(args)), file=sys.stderr)
         traceback.print_exc(None, sys.stderr)
         sys.exit(1)

@@ -1,5 +1,6 @@
 import binascii
 import struct
+from typing import Any
 
 
 def wrap_float(v):
@@ -19,7 +20,7 @@ def wrap_bytes(value):
 
 
 def guess_wire_type(value):
-    if isinstance(value, str) or isinstance(value, bytes):
+    if isinstance(value, (str, bytes)):
         return 2
     else:
         return 0
@@ -29,7 +30,7 @@ def invert_structure(structure: dict) -> dict:
     inv = {}
     for k, v in structure.items():
         if isinstance(v, tuple):
-            if isinstance(v[2], dict):
+            if isinstance(v[2], dict):  # TODO: check len(v)
                 inv[v[0]] = (k, v[1], invert_structure(v[2]))
             else:
                 inv[v[0]] = (k,) + v[1:]
@@ -38,7 +39,7 @@ def invert_structure(structure: dict) -> dict:
     return inv
 
 
-def conv_binary_to_str(data):
+def conv_binary_to_str(data: Any) -> Any:
     """
     In Python 2, we can dump to a JSON object directly, but Python 3
     doesn't like that some of the data is binary (since that's invalid in

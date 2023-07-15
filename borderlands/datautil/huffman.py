@@ -1,6 +1,6 @@
 from bisect import insort
 
-from borderlands.datautil.bitstream import ReadBitstream, WriteBitstream
+from borderlands.datautil.bitstreams import ReadBitstream, WriteBitstream
 
 
 class HuffmanNode:
@@ -15,7 +15,7 @@ class HuffmanNode:
     rather than doing that I'm doing this hacky thing.  C'est la vie.
     """
 
-    def __init__(self, weight, data) -> None:
+    def __init__(self, *, weight: int, data) -> None:
         self.weight = weight
         self.data = data
 
@@ -65,18 +65,18 @@ def write_huffman_tree(node, b: WriteBitstream) -> None:
         write_huffman_tree(node[1][1], b)
 
 
-def make_huffman_tree(data):
+def make_huffman_tree(data) -> list:
     frequencies = [0] * 256
     for c in data:
         frequencies[c] += 1
 
-    nodes = [HuffmanNode(f, i) for (i, f) in enumerate(frequencies) if f != 0]
+    nodes = [HuffmanNode(weight=f, data=i) for i, f in enumerate(frequencies) if f != 0]
     nodes.sort()
 
     while len(nodes) > 1:
         left, right = nodes[:2]
         nodes = nodes[2:]
-        insort(nodes, HuffmanNode(left.weight + right.weight, [left, right]))
+        insort(nodes, HuffmanNode(weight=left.weight + right.weight, data=[left, right]))
 
     return nodes[0].to_list()
 
@@ -95,7 +95,7 @@ def huffman_decompress(tree, bitstream, size):
     output = bytearray()
     while len(output) < size:
         node = tree
-        while 1:
+        while True:
             b = bitstream.read_bit()
             node = node[1][b]
             if isinstance(node[1], int):

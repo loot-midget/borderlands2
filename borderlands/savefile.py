@@ -9,10 +9,11 @@ import random
 import struct
 import sys
 from io import BytesIO
-from typing import List, Tuple, Dict, Set, Any
+from types import NoneType
+from typing import List, Tuple, Dict, Set, Any, Union, Optional
 
 from borderlands.challenges import Challenge
-from borderlands.datautil.bitstream import ReadBitstream, WriteBitstream
+from borderlands.datautil.bitstreams import ReadBitstream, WriteBitstream
 from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 from borderlands.datautil.common import invert_structure, replace_raw_item_key
 from borderlands.datautil.errors import BorderlandsError
@@ -37,6 +38,25 @@ from borderlands.datautil.protobuf import (
 )
 
 
+def adjust_value(*, prev: Union[str, int, NoneType], min_value: int, max_value: int, label: str) -> Optional[int]:
+    if prev is None:
+        return None
+
+    if prev == 'max':
+        return max_value
+
+    try:
+        int_value = int(prev)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{label} value {prev!r} is not a number')
+
+    if int_value > max_value:
+        return max_value
+    if int_value < min_value:
+        return min_value
+    return int_value
+
+
 class Config(argparse.Namespace):
     """
     Class to hold our configuration information.  Note that
@@ -46,7 +66,7 @@ class Config(argparse.Namespace):
 
     # Given by the user, booleans
     json = False
-    bigendian = False
+    big_endian = False
     verbose = True
     force = False
     copy_nvhm_missions = False
@@ -67,12 +87,12 @@ class Config(argparse.Namespace):
     moonstone = None
     seraph = None
     torgue = None
-    itemlevels = None
+    item_levels = None
     backpack = None
     bank = None
-    gunslots = None
-    maxammo = None
-    oplevel = None
+    gun_slots = None
+    max_ammo = None
+    op_level = None
     unlock = {}
     challenges = {}
 
@@ -81,7 +101,16 @@ class Config(argparse.Namespace):
     changes = False
     show_info = False
 
-    def finish(self, parser, app):
+    def finish(
+        self,
+        *,
+        parser: argparse.ArgumentParser,
+        max_level: int,
+        min_backpack_size: int,
+        max_backpack_size: int,
+        min_bank_size: int,
+        max_bank_size: int,
+    ) -> None:
         """
         Some extra sanity checks on our options.  "parser" should
         be an active ArgumentParser object we can use to raise
@@ -89,15 +118,15 @@ class Config(argparse.Namespace):
         lookups.
         """
 
-        # Endianness
-        if self.bigendian:
+        # byte order
+        if self.big_endian:
             self.endian = '>'
         else:
             self.endian = '<'
 
         # If we're unlocking ammo, also set maxammo
         if 'ammo' in self.unlock:
-            self.maxammo = True
+            self.max_ammo = True
 
         # Set our "changes" boolean -- first, args which take a value
         if any(
@@ -106,16 +135,15 @@ class Config(argparse.Namespace):
                 self.backpack,
                 self.bank,
                 self.eridium,
-                self.gunslots,
-                self.itemlevels,
+                self.gun_slots,
+                self.item_levels,
                 self.level,
-                self.maxammo,
+                self.max_ammo,
                 self.money,
                 self.moonstone,
                 self.name,
-                self.oplevel,
+                self.op_level,
                 self.save_game_id,
-                self.seraph,
                 self.seraph,
                 self.torgue,
             ]
@@ -135,43 +163,24 @@ class Config(argparse.Namespace):
             self.show_info = True
 
         # Can't read/write to the same file
-        if self.input_filename == self.output_filename and self.input_filename != '-':
+        if os.path.abspath(self.input_filename) == os.path.abspath(self.output_filename) and self.input_filename != '-':
             parser.error('input_filename and output_filename cannot be the same file')
 
         # If the user specified --level, make sure it's from 1 to 80
         if self.level is not None:
             if self.level < 1:
                 parser.error('level must be at least 1')
-            if self.level > app.max_level:
-                parser.error(f'level can be at most {app.max_level}')
+            if self.level > max_level:
+                parser.error(f'level can be at most {max_level}')
 
-        # Sort out 'backpack'
-        if self.backpack is not None:
-            if self.backpack == 'max':
-                self.backpack = app.max_backpack_size
-            else:
-                try:
-                    self.backpack = int(self.backpack)
-                except ValueError:
-                    parser.error(f'Backpack value "{self.backpack}" is not a number')
-                if self.backpack > app.max_backpack_size:
-                    self.backpack = app.max_backpack_size
-                elif self.backpack < app.min_backpack_size:
-                    self.backpack = app.min_backpack_size
+        self.backpack = adjust_value(
+            prev=self.backpack,
+            min_value=min_backpack_size,
+            max_value=max_backpack_size,
+            label='Backpack',
+        )
 
-        # Sort out bank
-        if self.bank is not None:
-            if self.bank == 'max':
-                self.bank = app.max_bank_size
-            else:
-                try:
-                    self.bank = int(self.bank)
-                except ValueError:
-                    parser.error(f'Backpack value "{self.bank}" is not a number')
-                if self.bank > app.max_bank_size:
-                    self.bank = app.max_bank_size
-                elif self.bank < app.min_bank_size:
-                    self.bank = app.min_bank_size
+        self.bank = adjust_value(prev=self.bank, min_value=min_bank_size, max_value=max_bank_size, label='Bank')
 
 
 class DictAction(argparse.Action):
@@ -200,9 +209,9 @@ class DictAction(argparse.Action):
         setattr(namespace, self.dest, arg_value)
 
 
-class App(object):
+class BaseApp:
     """
-    Our main application class.
+    Base application class.
     """
 
     # These seem to be the same for both BL2 and BLTPS
@@ -730,10 +739,10 @@ class App(object):
         # character level, in case we've been instructed to set items to the
         # character's level.
         seen_level_1_warning = False
-        if self.config.itemlevels is not None:
-            if self.config.itemlevels > 0:
-                self.debug(f' - Setting all items to level {self.config.itemlevels}')
-                level = self.config.itemlevels
+        if self.config.item_levels is not None:
+            if self.config.item_levels > 0:
+                self.debug(f' - Setting all items to level {self.config.item_levels}')
+                level = self.config.item_levels
             else:
                 level = player[2][0][1]
                 self.debug(f' - Setting all items to character level ({level})')
@@ -741,7 +750,7 @@ class App(object):
                 for field in player[field_number]:
                     field_data = read_protobuf(field[1])
                     is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
-                    if self.config.forceitemlevels or item[4] > 1:
+                    if self.config.force_item_levels or item[4] > 1:
                         item = item[:4] + [level, level] + item[6:]
                         field_data[1][0][1] = self.wrap_item(is_weapon, item, key)
                         field[1] = write_protobuf(field_data)
@@ -756,9 +765,9 @@ class App(object):
         # rigorous example of how to process those properly.
         # Note that this needs to happen before the unlock section, since
         # it may trigger an unlock of UVHM if that wasn't already specified.
-        if self.config.oplevel is not None:
+        if self.config.op_level is not None:
             set_op_level = False
-            self.debug(f' - Setting OP Level to {self.config.oplevel}')
+            self.debug(f' - Setting OP Level to {self.config.op_level}')
 
             # Constructing the new value ahead of time since we'll need it
             # no matter what else happens below.
@@ -766,11 +775,11 @@ class App(object):
             # value in as the same format we got it.  So: awesome. Byte order
             # shouldn't actually matter here so long as it's consistent.
             new_field_data = struct.unpack(
-                '>Q', struct.pack('>q', -(4 | (max(0, min(self.config.oplevel, 0x7FFFFF)) << 8)))
+                '>Q', struct.pack('>q', -(4 | (max(0, min(self.config.op_level, 0x7FFFFF)) << 8)))
             )[0]
 
             # Now actually get on with it
-            if self.config.oplevel > 0:
+            if self.config.op_level > 0:
                 if player[7][0][1] < 2 and 'uvhm' not in self.config.unlock:
                     self.config.unlock['uvhm'] = True
                     self.debug('   - Also unlocking UVHM mode')
@@ -837,9 +846,9 @@ class App(object):
                 s = s + (9 - len(s)) * [0]
             player[36][0][1] = write_repeated_protobuf_value(s[:8] + [sdu_size] + s[9:], 0)
 
-        if self.config.gunslots is not None:
-            self.debug(f' - Setting available gun slots to {self.config.gunslots}')
-            n = self.config.gunslots
+        if self.config.gun_slots is not None:
+            self.debug(f' - Setting available gun slots to {self.config.gun_slots}')
+            n = self.config.gun_slots
             slots = read_protobuf(player[13][0][1])
             slots[2][0][1] = n
             if slots[3][0][1] > n - 2:
@@ -1335,6 +1344,7 @@ class App(object):
             '-b',
             '--bigendian',
             action='store_true',
+            dest='big_endian',
             help='change the output format to big-endian, to write PS/xbox save files',
         )
 
@@ -1387,6 +1397,7 @@ class App(object):
         parser.add_argument(
             '--itemlevels',
             type=int,
+            dest='item_levels',
             help='Set item levels (to set to current player level, specify 0).'
             'Skips level 1 items unless --forceitemlevels is specified too',
         )
@@ -1394,6 +1405,7 @@ class App(object):
         parser.add_argument(
             '--forceitemlevels',
             action='store_true',
+            dest='force_item_levels',
             help='Set item levels even if the item is at level 1',
         )
 
@@ -1411,6 +1423,7 @@ class App(object):
             '--gunslots',
             type=int,
             choices=[2, 3, 4],
+            dest='gun_slots',
             help='Set number of gun slots open',
         )
 
@@ -1440,6 +1453,7 @@ class App(object):
         parser.add_argument(
             '--maxammo',
             action='store_true',
+            dest='max_ammo',
             help='Fill all ammo pools to their maximum',
         )
 
@@ -1475,7 +1489,14 @@ class App(object):
         parser.parse_args(argv, config)
 
         # Do some extra fiddling
-        config.finish(parser, self)
+        config.finish(
+            parser=parser,
+            max_level=self.max_level,
+            min_backpack_size=self.min_backpack_size,
+            max_backpack_size=self.max_backpack_size,
+            min_bank_size=self.min_bank_size,
+            max_bank_size=self.max_bank_size,
+        )
 
         # Some sanity checking with output type and output_filename
         if config.output_filename is None:

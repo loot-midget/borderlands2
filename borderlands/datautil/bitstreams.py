@@ -1,19 +1,19 @@
 import copy
 
 
-class ReadBitstream(object):
-    def __init__(self, s):
+class ReadBitstream:
+    def __init__(self, s: bytes) -> None:
         self.s = s
         self.i = 0
 
-    def read_bit(self):
+    def read_bit(self) -> int:
         i = self.i
         self.i = i + 1
         byte = self.s[i >> 3]
         bit = byte >> (7 - (i & 7))
         return bit & 1
 
-    def read_bits(self, n):
+    def read_bits(self, n: int) -> int:
         s = self.s
         i = self.i
         end = i + n
@@ -36,13 +36,13 @@ class ReadBitstream(object):
         return (byte >> (8 - (i & 7))) & 0xFF
 
 
-class WriteBitstream(object):
-    def __init__(self):
+class WriteBitstream:
+    def __init__(self) -> None:
         self.s = bytearray()
         self.byte = 0
         self.i = 7
 
-    def write_bit(self, b):
+    def write_bit(self, b: int) -> None:
         i = self.i
         byte = self.byte | (b << i)
         if i == 0:
@@ -53,7 +53,7 @@ class WriteBitstream(object):
             self.byte = byte
             self.i = i - 1
 
-    def write_bits(self, b, n):
+    def write_bits(self, b: int, n: int) -> None:
         s = self.s
         byte = self.byte
         i = self.i
@@ -72,7 +72,7 @@ class WriteBitstream(object):
         self.byte = byte
         self.i = i
 
-    def write_byte(self, b):
+    def write_byte(self, b: int) -> None:
         i = self.i
         if i == 7:
             self.s.append(b)
@@ -80,7 +80,7 @@ class WriteBitstream(object):
             self.s.append(self.byte | (b >> (7 - i)))
             self.byte = (b << (i + 1)) & 0xFF
 
-    def getvalue(self):
+    def getvalue(self) -> bytes:
         if self.i != 7:
             ret_s = copy.copy(self.s)
             ret_s.append(self.byte)

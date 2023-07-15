@@ -63,7 +63,7 @@ def remove_structure(data: dict, inv) -> dict:
 def read_varint(f):
     value = 0
     offset = 0
-    while 1:
+    while True:
         b = ord(f.read(1))
         value |= (b & 0x7F) << offset
         if (b & 0x80) == 0:

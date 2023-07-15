@@ -3,10 +3,10 @@ from typing import List, Dict, Any
 
 from borderlands import bl2_data
 from borderlands.datautil.common import unwrap_float, wrap_float, unwrap_bytes, wrap_bytes
-from borderlands.savefile import App
+from borderlands.savefile import BaseApp
 
 
-class AppBL2(App):
+class AppBL2(BaseApp):
     """
     Our main application class for Borderlands 2
     """
@@ -191,17 +191,17 @@ class AppBL2(App):
         )
 
     @staticmethod
-    def oplevel(value):
+    def op_level(value):
         """
         Helper function for argparse which requires a valid Overpower level
         """
         try:
-            intval = int(value)
+            int_val = int(value)
         except ValueError:
             raise argparse.ArgumentTypeError('OP Levels must be from 0 to 10')
-        if intval < 0 or intval > 10:
-            raise argparse.ArgumentTypeError('OP Levels must be from 0 to 10')
-        return intval
+        if 0 <= int_val <= 10:
+            return int_val
+        raise argparse.ArgumentTypeError('OP Levels must be from 0 to 10')
 
     def setup_game_specific_args(self, parser):
         """
@@ -210,6 +210,6 @@ class AppBL2(App):
 
         parser.add_argument(
             '--oplevel',
-            type=AppBL2.oplevel,
+            type=AppBL2.op_level,
             help='OP Level to unlock (will also unlock TVHM/UVHM if not already unlocked)',
         )

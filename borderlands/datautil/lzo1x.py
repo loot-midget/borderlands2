@@ -1,5 +1,4 @@
-# Ditto
-from typing import Final, Optional
+from typing import Final, Optional, Tuple
 
 CLZ_TABLE: Final = (
     32,
@@ -42,25 +41,26 @@ CLZ_TABLE: Final = (
 )
 
 
-def expand_zeroes(src, ip, extra):
+def expand_zeroes(*, src: bytearray, ip: int, extra: int) -> Tuple[int, int]:
     start = ip
+    # TODO: add check for src.size
     while src[ip] == 0:
         ip = ip + 1
     v = ((ip - start) * 255) + src[ip]
     return v + extra, ip + 1
 
 
-def copy_earlier(b, offset, n):
+def copy_earlier(*, b: bytearray, offset: int, chunk_size: int) -> None:
     i = len(b) - offset
-    end = i + n
+    end = i + chunk_size
     while i < end:
-        chunk = b[i : i + n]
+        chunk = b[i : i + chunk_size]
         i = i + len(chunk)
-        n = n - len(chunk)
+        chunk_size = chunk_size - len(chunk)
         b.extend(chunk)
 
 
-def read_xor32(src, p1, p2):
+def read_xor32(src: bytearray, p1: int, p2: int) -> int:
     v1 = src[p1] | (src[p1 + 1] << 8) | (src[p1 + 2] << 16) | (src[p1 + 3] << 24)
     v2 = src[p2] | (src[p2 + 1] << 8) | (src[p2 + 2] << 16) | (src[p2 + 3] << 24)
     return v1 ^ v2
@@ -81,37 +81,37 @@ def lzo1x_decompress(s: bytes) -> bytes:
         ip += 1
     elif t < 16:
         if t == 0:
-            t, ip = expand_zeroes(src, ip, 15)
+            t, ip = expand_zeroes(src=src, ip=ip, extra=15)
         dst.extend(src[ip : ip + t + 3])
         ip += t + 3
         t = src[ip]
         ip += 1
 
-    while 1:
-        while 1:
+    while True:
+        while True:
             if t >= 64:
-                copy_earlier(dst, 1 + ((t >> 2) & 7) + (src[ip] << 3), (t >> 5) + 1)
+                copy_earlier(b=dst, offset=1 + ((t >> 2) & 7) + (src[ip] << 3), chunk_size=(t >> 5) + 1)
                 ip += 1
             elif t >= 32:
                 count = t & 31
                 if count == 0:
-                    count, ip = expand_zeroes(src, ip, 31)
+                    count, ip = expand_zeroes(src=src, ip=ip, extra=31)
                 t = src[ip]
-                copy_earlier(dst, 1 + ((t | (src[ip + 1] << 8)) >> 2), count + 2)
+                copy_earlier(b=dst, offset=1 + ((t | (src[ip + 1] << 8)) >> 2), chunk_size=count + 2)
                 ip += 2
             elif t >= 16:
                 offset = (t & 8) << 11
                 count = t & 7
                 if count == 0:
-                    count, ip = expand_zeroes(src, ip, 7)
+                    count, ip = expand_zeroes(src=src, ip=ip, extra=7)
                 t = src[ip]
                 offset += (t | (src[ip + 1] << 8)) >> 2
                 ip += 2
                 if offset == 0:
                     return bytes(dst)
-                copy_earlier(dst, offset + 0x4000, count + 2)
+                copy_earlier(b=dst, offset=offset + 0x4000, chunk_size=count + 2)
             else:
-                copy_earlier(dst, 1 + (t >> 2) + (src[ip] << 2), 2)
+                copy_earlier(b=dst, offset=1 + (t >> 2) + (src[ip] << 2), chunk_size=2)
                 ip += 1
 
             t = t & 3
@@ -122,18 +122,18 @@ def lzo1x_decompress(s: bytes) -> bytes:
             t = src[ip]
             ip += 1
 
-        while 1:
+        while True:
             t = src[ip]
             ip += 1
             if t < 16:
                 if t == 0:
-                    t, ip = expand_zeroes(src, ip, 15)
+                    t, ip = expand_zeroes(src=src, ip=ip, extra=15)
                 dst.extend(src[ip : ip + t + 3])
                 ip += t + 3
                 t = src[ip]
                 ip += 1
             if t < 16:
-                copy_earlier(dst, 1 + 0x0800 + (t >> 2) + (src[ip] << 2), 3)
+                copy_earlier(b=dst, offset=1 + 0x0800 + (t >> 2) + (src[ip] << 2), chunk_size=3)
                 ip += 1
                 t = t & 3
                 if t == 0:
@@ -156,8 +156,8 @@ def lzo1x_1_compress_core(*, src: bytearray, dst: bytearray, ti: int, ip_start: 
 
     ip += (4 - ti) if ti < 4 else 0
     ip += 1 + ((ip - ii) >> 5)
-    while 1:
-        while 1:
+    while True:
+        while True:
             if ip >= ip_end:
                 return in_end - (ii - ti)
             dv = src[ip : ip + 4]
@@ -194,7 +194,7 @@ def lzo1x_1_compress_core(*, src: bytearray, dst: bytearray, ti: int, ip_start: 
         m_len = 4
         v = read_xor32(src, ip + m_len, m_pos + m_len)
         if v == 0:
-            while 1:
+            while True:
                 m_len += 4
                 v = read_xor32(src, ip + m_len, m_pos + m_len)
                 if ip + m_len >= ip_end:

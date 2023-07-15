@@ -2,10 +2,10 @@ from typing import Any, Dict, List
 
 from borderlands import bltps_data
 from borderlands.datautil.common import unwrap_float, wrap_float, unwrap_bytes, wrap_bytes
-from borderlands.savefile import App
+from borderlands.savefile import BaseApp
 
 
-class AppTPS(App):
+class AppTPS(BaseApp):
     """
     Our main application class for Borderlands: The Pre-Sequel
     """

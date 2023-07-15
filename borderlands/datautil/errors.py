@@ -1,2 +1,2 @@
-class BorderlandsError(Exception):
+class BorderlandsError(RuntimeError):
     pass
