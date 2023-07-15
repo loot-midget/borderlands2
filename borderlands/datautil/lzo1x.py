@@ -1,5 +1,5 @@
 # Ditto
-from typing import Final, Tuple, Optional
+from typing import Final, Optional
 
 CLZ_TABLE: Final = (
     32,

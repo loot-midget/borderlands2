@@ -1,6 +1,6 @@
 from bisect import insort
 
-from borderlands.compression.bitstream import ReadBitstream, WriteBitstream
+from borderlands.datautil.bitstream import ReadBitstream, WriteBitstream
 
 
 class HuffmanNode:

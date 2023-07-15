@@ -1,10 +1,12 @@
 import struct
 from io import BytesIO
+from typing import Dict
 
-from borderlands.savefile import BorderlandsError
+from borderlands.datautil.errors import BorderlandsError
+from borderlands.datautil.common import wrap_bytes, guess_wire_type
 
 
-def remove_structure(data, inv):
+def remove_structure(data: dict, inv) -> dict:
     pbdata = {}
     pbdata.update(data.get("_raw", {}))
     for k, value in data.items():
@@ -123,7 +125,7 @@ def write_repeated_protobuf_value(data, wire_type):
     return b.getvalue()
 
 
-def read_protobuf(data):
+def read_protobuf(data: bytes) -> Dict[int, list]:
     fields = {}
     end_position = len(data)
     bytestream = BytesIO(data)
@@ -136,10 +138,10 @@ def read_protobuf(data):
     return fields
 
 
-def apply_structure(pbdata, s):
+def apply_structure(pb_data: dict, s: dict) -> dict:
     fields = {}
     raw = {}
-    for k, data in pbdata.items():
+    for k, data in pb_data.items():
         mapping = s.get(k)
         if mapping is None:
             raw[k] = data
@@ -163,7 +165,7 @@ def apply_structure(pbdata, s):
             values = [apply_structure(read_protobuf(d[1]), child_s) for d in data]
             fields[key] = values if repeated else values[0]
         else:
-            raise Exception(f"Invalid mapping {mapping!r} for {k!r}: {data!r}")
+            raise TypeError(f"Wrong type of child_s: {type(child_s)}. Invalid mapping {mapping!r} for {k!r}: {data!r}")
     if len(raw) != 0:
         fields["_raw"] = {}
         for k, values in raw.items():

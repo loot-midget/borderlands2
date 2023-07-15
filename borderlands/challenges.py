@@ -37,7 +37,7 @@ class Challenge:
         self.position = position
         self.identifier = identifier
         self.id_text = id_text
-        self.cat = category
+        self.category = category
         self.name = name
         self.description = description
         self.levels = levels

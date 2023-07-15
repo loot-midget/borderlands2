@@ -5,6 +5,7 @@ NOTE: cleanup tests code
 import os
 import sys
 import subprocess
+from typing import Optional
 
 
 class Test(object):
@@ -25,7 +26,7 @@ class Test(object):
         'three': '.3',
     }
 
-    def __init__(self, desc, input_file, args, text_output=False, restrict_game=False):
+    def __init__(self, desc, input_file, args, text_output=False, restrict_game: Optional[str] = None):
         self.desc = desc
         self.input_file = input_file
         self.args = args
@@ -34,7 +35,7 @@ class Test(object):
 
     def run(self):
         for game in self.games:
-            if self.restrict_game and game != self.restrict_game:
+            if self.restrict_game is not None and game != self.restrict_game:
                 print('{} {}: skipping'.format(game, self.desc))
                 continue
             output_files = []
@@ -62,7 +63,7 @@ class Test(object):
                     else:
                         with open(full_output, 'rb') as df:
                             output_data.append(df.read())
-                except FileNotFoundError as e:
+                except FileNotFoundError:
                     output_data.append('{} {} result does not exist'.format(game, executable))
             if output_data[0] != output_data[1]:
                 print('{} {}: files {} and {} do not match'.format(game, self.desc, output_files[0], output_files[1]))

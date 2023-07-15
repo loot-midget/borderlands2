@@ -1,0 +1,2 @@
+class BorderlandsError(Exception):
+    pass
