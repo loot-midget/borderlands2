@@ -32,7 +32,8 @@ from borderlands.datautil.protobuf import (
     read_protobuf,
     apply_structure,
     write_protobuf,
-    remove_structure, PlayerDict,
+    remove_structure,
+    PlayerDict,
 )
 from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 
