@@ -19,14 +19,16 @@ Arguments: {}
 
 def run(game_name: str) -> None:
     python_version_check()
+
+    if game_name == 'BL2':
+        app_class = AppBL2
+    elif game_name == 'TPS':
+        app_class = AppTPS
+    else:
+        raise RuntimeError(f'unknown game: {game_name!r}')
+
     # noinspection PyBroadException
     try:
-        if game_name == 'BL2':
-            app_class = AppBL2
-        elif game_name == 'TPS':
-            app_class = AppTPS
-        else:
-            raise RuntimeError(f'unknown game: {game_name!r}')
         app = app_class(sys.argv[1:])
         app.run()
     except Exception:
