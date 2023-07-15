@@ -5,6 +5,8 @@ from typing import Dict
 from borderlands.datautil.errors import BorderlandsError
 from borderlands.datautil.common import wrap_bytes, guess_wire_type
 
+PlayerDict = Dict[int, list]
+
 
 def remove_structure(data: dict, inv) -> dict:
     pbdata = {}
@@ -92,7 +94,7 @@ def read_protobuf_value(b, wire_type):
     return value
 
 
-def read_repeated_protobuf_value(data, wire_type):
+def read_repeated_protobuf_value(data, wire_type) -> list:
     b = BytesIO(data)
     values = []
     while b.tell() < len(data):
@@ -125,7 +127,7 @@ def write_repeated_protobuf_value(data, wire_type):
     return b.getvalue()
 
 
-def read_protobuf(data: bytes) -> Dict[int, list]:
+def read_protobuf(data: bytes) -> PlayerDict:
     fields = {}
     end_position = len(data)
     bytestream = BytesIO(data)
@@ -138,7 +140,7 @@ def read_protobuf(data: bytes) -> Dict[int, list]:
     return fields
 
 
-def apply_structure(pb_data: dict, s: dict) -> dict:
+def apply_structure(pb_data: PlayerDict, s: dict) -> dict:
     fields = {}
     raw = {}
     for k, data in pb_data.items():

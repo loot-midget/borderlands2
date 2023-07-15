@@ -32,7 +32,7 @@ from borderlands.datautil.protobuf import (
     read_protobuf,
     apply_structure,
     write_protobuf,
-    remove_structure,
+    remove_structure, PlayerDict,
 )
 from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 
@@ -101,8 +101,8 @@ class Config(argparse.Namespace):
 
         # Set our "changes" boolean -- first, args which take a value
         if any(
-            var is not None
-            for var in [
+            x is not None
+            for x in [
                 self.backpack,
                 self.bank,
                 self.eridium,
@@ -413,12 +413,12 @@ class App(object):
         return is_weapon, self.unpack_item_values(is_weapon, raw[2:]), key
 
     def unwrap_black_market(self, value):
-        sdus = read_repeated_protobuf_value(value, 0)
-        return dict(zip(self.black_market_keys, sdus))
+        sdu_list = read_repeated_protobuf_value(value, 0)
+        return dict(zip(self.black_market_keys, sdu_list))
 
     def wrap_black_market(self, value):
-        sdus = [value[k] for k in self.black_market_keys[: len(value)]]
-        return write_repeated_protobuf_value(sdus, 0)
+        sdu_list = [value[k] for k in self.black_market_keys[: len(value)]]
+        return write_repeated_protobuf_value(sdu_list, 0)
 
     def unwrap_challenges(self, data):
         """
@@ -494,7 +494,7 @@ class App(object):
 
         return mydict
 
-    def get_fully_explored_areas(self, player) -> list[str]:
+    def get_fully_explored_areas(self, player: PlayerDict) -> list[str]:
         """
         Reuse converting full player data to json
         for simpler code
@@ -505,7 +505,7 @@ class App(object):
         names = [x.decode('utf-8') for x in json_data['explored_areas']]
         return names
 
-    def print_explored_levels(self, player) -> None:
+    def print_explored_levels(self, player: PlayerDict) -> None:
         if not self.levels_to_travel_station_map:
             self.error(f'levels_to_travel_station_map is empty in class {self.__class__.__name__}')
             return
@@ -1062,25 +1062,24 @@ class App(object):
             player[15][0][1] = self.wrap_challenges(data)
 
         if self.config.fix_challenge_overflow:
+            self.debug('Fix challenge overflow:')
             data = self.unwrap_challenges(player[15][0][1])
 
             for save_challenge in data['challenges']:
                 if save_challenge['id'] in self.challenges:
                     if save_challenge['total_value'] >= 2000000000:
-                        print(f'fix overflow in: {save_challenge["_name"]}')
+                        self.notice(f'fix overflow in: {save_challenge["_name"]}')
                         save_challenge['total_value'] = self.challenges[save_challenge['id']].get_max() + 1
 
             player[15][0][1] = self.wrap_challenges(data)
 
-        if self.config.name is not None and self.config.name:
-            # TODO: move length check into config parsing
+        if self.config.name is not None:
             self.debug(f' - Setting character name to "{self.config.name}"')
             data = apply_structure(read_protobuf(player[19][0][1]), self.save_structure[19][2])
             data['name'] = self.config.name
             player[19][0][1] = write_protobuf(remove_structure(data, invert_structure(self.save_structure[19][2])))
 
-        if self.config.save_game_id is not None and self.config.save_game_id > 0:
-            # TODO: move check into config parsing
+        if self.config.save_game_id is not None:
             self.debug(f' - Setting save slot ID to {self.config.save_game_id}')
             player[20][0][1] = self.config.save_game_id
 
@@ -1281,6 +1280,22 @@ class App(object):
         Parse our arguments.
         """
 
+        def non_empty_string(s):
+            if len(s) > 0:
+                return s
+            raise argparse.ArgumentTypeError("Value must have length greater than 0")
+
+        def positive_int(value):
+            try:
+                result = int(value)
+            except Exception:
+                raise argparse.ArgumentTypeError(f'positive integer value required: {value!r}')
+
+            if result > 0:
+                return result
+
+            raise argparse.ArgumentTypeError(f'positive integer value required: {result!r}')
+
         # Set up our config object
         config = Config()
 
@@ -1342,13 +1357,14 @@ class App(object):
 
         parser.add_argument(
             '--name',
+            type=non_empty_string,
             help='Set the name of the character',
         )
 
         parser.add_argument(
             '--save-game-id',
             dest='save_game_id',
-            type=int,
+            type=positive_int,
             help='Set the save game slot ID of the character (probably not actually needed ever)',
         )
 
