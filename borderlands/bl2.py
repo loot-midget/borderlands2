@@ -203,13 +203,11 @@ class AppBL2(BaseApp):
             return int_val
         raise argparse.ArgumentTypeError('OP Levels must be from 0 to 10')
 
-    def setup_game_specific_args(self, parser):
-        """
-        Adds BL2-specific arguments
-        """
-
+    @staticmethod
+    def setup_game_specific_args(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             '--oplevel',
             type=AppBL2.op_level,
+            dest='op_level',
             help='OP Level to unlock (will also unlock TVHM/UVHM if not already unlocked)',
         )

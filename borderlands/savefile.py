@@ -2,17 +2,17 @@ import argparse
 import base64
 import binascii
 import hashlib
+import io
 import json
 import math
 import os
 import random
 import struct
 import sys
-from io import BytesIO
-from types import NoneType
-from typing import List, Tuple, Dict, Set, Any, Union, Optional
+from typing import List, Tuple, Dict, Set, Any, Optional
 
 from borderlands.challenges import Challenge
+from borderlands.config import parse_args
 from borderlands.datautil.bitstreams import ReadBitstream, WriteBitstream
 from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 from borderlands.datautil.common import invert_structure, replace_raw_item_key
@@ -36,181 +36,6 @@ from borderlands.datautil.protobuf import (
     remove_structure,
     PlayerDict,
 )
-
-
-def adjust_value(*, prev: Union[str, int, NoneType], min_value: int, max_value: int, label: str) -> Optional[int]:
-    if prev is None:
-        return None
-
-    if prev == 'max':
-        return max_value
-
-    try:
-        int_value = int(prev)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f'{label} value {prev!r} is not a number')
-
-    if int_value > max_value:
-        return max_value
-    if int_value < min_value:
-        return min_value
-    return int_value
-
-
-class Config(argparse.Namespace):
-    """
-    Class to hold our configuration information.  Note that
-    we're NOT using a separate class for BL2 and BLTPS configs,
-    since so much of it is the same.
-    """
-
-    # Given by the user, booleans
-    json = False
-    big_endian = False
-    verbose = True
-    force = False
-    copy_nvhm_missions = False
-    print_unexplored_levels = False
-
-    # Given by the user, strings
-    import_items = None
-    output = 'savegame'
-    input_filename = '-'
-    output_filename = '-'
-
-    # Former 'modify' options
-    name = None
-    save_game_id = None
-    level = None
-    money = None
-    eridium = None
-    moonstone = None
-    seraph = None
-    torgue = None
-    item_levels = None
-    backpack = None
-    bank = None
-    gun_slots = None
-    max_ammo = None
-    op_level = None
-    unlock = {}
-    challenges = {}
-
-    # Config options interpreted from the above
-    endian = '<'
-    changes = False
-    show_info = False
-
-    def finish(
-        self,
-        *,
-        parser: argparse.ArgumentParser,
-        max_level: int,
-        min_backpack_size: int,
-        max_backpack_size: int,
-        min_bank_size: int,
-        max_bank_size: int,
-    ) -> None:
-        """
-        Some extra sanity checks on our options.  "parser" should
-        be an active ArgumentParser object we can use to raise
-        errors.  "app" is an App object which we use for a couple
-        lookups.
-        """
-
-        # byte order
-        if self.big_endian:
-            self.endian = '>'
-        else:
-            self.endian = '<'
-
-        # If we're unlocking ammo, also set maxammo
-        if 'ammo' in self.unlock:
-            self.max_ammo = True
-
-        # Set our "changes" boolean -- first, args which take a value
-        if any(
-            x is not None
-            for x in [
-                self.backpack,
-                self.bank,
-                self.eridium,
-                self.gun_slots,
-                self.item_levels,
-                self.level,
-                self.max_ammo,
-                self.money,
-                self.moonstone,
-                self.name,
-                self.op_level,
-                self.save_game_id,
-                self.seraph,
-                self.torgue,
-            ]
-        ):
-            self.changes = True
-
-        # Next, boolean args which are set to True
-        if any([self.copy_nvhm_missions]):
-            self.changes = True
-
-        # Finally, any unlocks/challenges we mean to set
-        if any(bool(var) for var in [self.unlock, self.challenges]):
-            self.changes = True
-
-        # Now set our "show_info" boolean.  Just a single boolean option, at the moment
-        if any([self.print_unexplored_levels]):
-            self.show_info = True
-
-        # Can't read/write to the same file
-        if (
-            self.output_filename is not None
-            and self.input_filename != '-'
-            and os.path.abspath(self.input_filename) == os.path.abspath(self.output_filename)
-        ):
-            parser.error('input_filename and output_filename cannot be the same file')
-
-        # If the user specified --level, make sure it's from 1 to 80
-        if self.level is not None:
-            if self.level < 1:
-                parser.error('level must be at least 1')
-            if self.level > max_level:
-                parser.error(f'level can be at most {max_level}')
-
-        self.backpack = adjust_value(
-            prev=self.backpack,
-            min_value=min_backpack_size,
-            max_value=max_backpack_size,
-            label='Backpack',
-        )
-
-        self.bank = adjust_value(prev=self.bank, min_value=min_bank_size, max_value=max_bank_size, label='Bank')
-
-
-class DictAction(argparse.Action):
-    """
-    Custom argparse action to put list-like arguments into
-    a dict (where the value will be True) rather than a list.
-    This is probably implemented fairly shoddily.
-    """
-
-    def __init__(self, option_strings, dest, nargs=None, **kwargs):
-        """
-        Constructor, taken right from https://docs.python.org/2.7/library/argparse.html#action
-        """
-        if nargs is not None:
-            raise ValueError('nargs is not allowed')
-        super(DictAction, self).__init__(option_strings, dest, **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        """
-        Actually setting a value.  Forces the attr into a dict if it isn't already.
-        """
-        arg_value = getattr(namespace, self.dest)
-        if not isinstance(arg_value, dict):
-            arg_value = {}
-        arg_value[values] = True
-        setattr(namespace, self.dest, arg_value)
 
 
 class BaseApp:
@@ -375,6 +200,87 @@ class BaseApp:
         12787955,  # lvl 80
     ]
 
+    def __init__(
+        self,
+        *,
+        args: List[str],
+        item_struct_version: int,
+        game_name: str,
+        item_prefix: str,
+        max_level: int,  # Max char level
+        black_market_keys: Tuple[str, ...],
+        black_market_ammo: Dict[str, List[int]],
+        unlock_choices: List[str],  # Available choices for --unlock option
+        levels_to_travel_station_map: Dict[str, str],
+        no_exploration_challenge_levels: Set[str],
+        challenges: Dict[int, Challenge],
+    ) -> None:
+        # B2 version is 7, TPS version is 10
+        # "version" taken from what Gibbed calls it, not sure if that's
+        # an appropriate descriptor or not.
+        self.item_struct_version = item_struct_version
+
+        # Item export/import prefix
+        self.item_prefix = item_prefix
+
+        # The only difference here is that BLTPS has "laser"
+        self.black_market_keys = black_market_keys
+
+        # Dict to tell us which black market keys are ammo-related, and
+        # what the max ammo is at each level.  Could be computed pretty
+        # easily, but we may as well just store it.
+        self.black_market_ammo = black_market_ammo
+
+        # Level-to-Name Mapping
+        self.levels_to_travel_station_map = levels_to_travel_station_map
+
+        # Maps which don't actually contribute to the "Explorer-of-X" achievements
+        self.no_exploration_challenge_levels = no_exploration_challenge_levels
+
+        # There are two possible ways of uniquely identifying challenges in this file:
+        # via their numeric position in the list, or by what looks like an internal
+        # ID (though that ID is constructed a little weirdly, so I'm not sure if it's
+        # actually intended to be used that way or not).
+        #
+        # I did run some tests, and it looks like internally, B2 probably does use
+        # that ID field to identify the challenges...  You can mess around with the
+        # order in which they're saved to the file, but so long as the ID field
+        # is still pointing to the challenge you want, it'll be read in properly
+        # (and then when you save your game, they'll be written back out in the
+        # original order).
+        #
+        # Given that, I decided to go ahead and use that probably-ID field as the
+        # index on this dict, rather than the order.  That should be slightly more
+        # flexible for anyone editing the JSON directly, and theoretically
+        # shouldn't be a problem in the future since there won't be any new major
+        # DLC for B2...
+        #
+        # New major DLC for TPS seems unlikely too, though time will tell.
+        self.challenges = challenges
+
+        # Set up a reverse lookup for our ammo pools
+        self.ammo_resource_lookup = {}
+        for shortname, (resource, pool) in self.ammo_resources.items():
+            self.ammo_resource_lookup[resource] = shortname
+
+        # Parse Arguments
+        self.config = parse_args(
+            args=args,
+            setup_currency_args=self.setup_currency_args,
+            setup_game_specific_args=self.setup_game_specific_args,
+            game_name=game_name,
+            max_level=max_level,
+            min_backpack_size=self.min_backpack_size,
+            max_backpack_size=self.max_backpack_size,
+            min_bank_size=self.min_bank_size,
+            max_bank_size=self.max_bank_size,
+            unlock_choices=unlock_choices,
+        )
+
+        # Sets up our main save_structure var which controls how we read the file
+        # This is implemented in AppBL2 and AppBLTPS
+        self.save_structure = self.create_save_structure()
+
     def pack_item_values(self, is_weapon: int, values: list) -> bytes:
         i = 0
         item_bytes = bytearray(32)
@@ -508,38 +414,6 @@ class BaseApp:
 
         return mydict
 
-    def get_fully_explored_areas(self, player: PlayerDict) -> list[str]:
-        """
-        Reuse converting full player data to json
-        for simpler code
-        """
-        json_data = apply_structure(player, self.save_structure)
-        if 'explored_areas' not in json_data:
-            return []
-        names = [x.decode('utf-8') for x in json_data['explored_areas']]
-        return names
-
-    def print_explored_levels(self, player: PlayerDict) -> None:
-        if not self.levels_to_travel_station_map:
-            self.error(f'levels_to_travel_station_map is empty in class {self.__class__.__name__}')
-            return
-
-        unique_names = set(self.levels_to_travel_station_map.keys())
-        explored_areas = self.get_fully_explored_areas(player)
-        unexplored = set(unique_names) - set(explored_areas)
-        labels = []
-        for name in unexplored:
-            travel_station = self.levels_to_travel_station_map.get(name, name)
-            label = f'  {travel_station} ({name})'
-            if name in self.no_exploration_challenge_levels:
-                label += ' (does not contribute to Explorer-of-X achievement)'
-            labels.append(label)
-        if labels:
-            self.notice('Not fully explored levels:')
-            self.notice('\n'.join(sorted(labels)))
-        self.notice(f'Total not fully explored levels: {len(unexplored)}')
-        self.notice('')
-
     def wrap_challenges(self, data):
         """
         Re-wrap our challenge data.  See the notes above in unwrap_challenges for
@@ -550,7 +424,7 @@ class BaseApp:
         Change the number of challenges at your own risk!
         """
 
-        b = BytesIO()
+        b = io.BytesIO()
         b.write(
             struct.pack(
                 self.config.endian + 'IIH',
@@ -719,7 +593,7 @@ class BaseApp:
             ]
         ):
             raw = player[6][0][1]
-            b = BytesIO(raw)
+            b = io.BytesIO(raw)
             values = []
             while b.tell() < len(raw):
                 values.append(read_protobuf_value(b, 0))
@@ -1196,334 +1070,48 @@ class BaseApp:
 
         return self.wrap_player_data(write_protobuf(player))
 
-    def __init__(
-        self,
-        *,
-        args: List[str],
-        item_struct_version: int,
-        game_name: str,
-        item_prefix: str,
-        max_level: int,
-        black_market_keys: Tuple[str, ...],
-        black_market_ammo: Dict[str, List[int]],
-        unlock_choices: List[str],
-        levels_to_travel_station_map: Dict[str, str],
-        no_exploration_challenge_levels: Set[str],
-        challenges: Dict[int, Challenge],
-    ) -> None:
+    def get_fully_explored_areas(self, player: PlayerDict) -> list[str]:
         """
-        Constructor.  Parses arguments and sets up our save_structure
-        struct.
+        Reuse converting full player data to json
+        for simpler code
         """
-        # B2 version is 7, TPS version is 10
-        # "version" taken from what Gibbed calls it, not sure if that's
-        # an appropriate descriptor or not.
-        self.item_struct_version = item_struct_version
+        json_data = apply_structure(player, self.save_structure)
+        if 'explored_areas' not in json_data:
+            return []
+        names = [x.decode('utf-8') for x in json_data['explored_areas']]
+        return names
 
-        self.game_name = game_name
+    def print_explored_levels(self, player: PlayerDict) -> None:
+        if not self.levels_to_travel_station_map:
+            self.error(f'levels_to_travel_station_map is empty in class {self.__class__.__name__}')
+            return
 
-        # Item export/import prefix
-        self.item_prefix = item_prefix
-
-        # Max char level
-        self.max_level = max_level
-
-        # The only difference here is that BLTPS has "laser"
-        self.black_market_keys = black_market_keys
-
-        # Dict to tell us which black market keys are ammo-related, and
-        # what the max ammo is at each level.  Could be computed pretty
-        # easily, but we may as well just store it.
-        self.black_market_ammo = black_market_ammo
-
-        # Available choices for --unlock option
-        self.unlock_choices = unlock_choices
-
-        # Level-to-Name Mapping
-        self.levels_to_travel_station_map = levels_to_travel_station_map
-
-        # Maps which don't actually contribute to the "Explorer-of-X" achievements
-        self.no_exploration_challenge_levels = no_exploration_challenge_levels
-
-        # There are two possible ways of uniquely identifying challenges in this file:
-        # via their numeric position in the list, or by what looks like an internal
-        # ID (though that ID is constructed a little weirdly, so I'm not sure if it's
-        # actually intended to be used that way or not).
-        #
-        # I did run some tests, and it looks like internally, B2 probably does use
-        # that ID field to identify the challenges...  You can mess around with the
-        # order in which they're saved to the file, but so long as the ID field
-        # is still pointing to the challenge you want, it'll be read in properly
-        # (and then when you save your game, they'll be written back out in the
-        # original order).
-        #
-        # Given that, I decided to go ahead and use that probably-ID field as the
-        # index on this dict, rather than the order.  That should be slightly more
-        # flexible for anyone editing the JSON directly, and theoretically
-        # shouldn't be a problem in the future since there won't be any new major
-        # DLC for B2...
-        #
-        # New major DLC for TPS seems unlikely too, though time will tell.
-        self.challenges = challenges
-
-        # Set up a reverse lookup for our ammo pools
-        self.ammo_resource_lookup = {}
-        for shortname, (resource, pool) in self.ammo_resources.items():
-            self.ammo_resource_lookup[resource] = shortname
-
-        # Parse Arguments
-        self.config = self.parse_args(args)
-
-        # Sets up our main save_structure var which controls how we read the file
-        # This is implemented in AppBL2 and AppBLTPS
-        self.save_structure = self.create_save_structure()
+        unique_names = set(self.levels_to_travel_station_map.keys())
+        explored_areas = self.get_fully_explored_areas(player)
+        unexplored = set(unique_names) - set(explored_areas)
+        labels = []
+        for name in unexplored:
+            travel_station = self.levels_to_travel_station_map.get(name, name)
+            label = f'  {travel_station} ({name})'
+            if name in self.no_exploration_challenge_levels:
+                label += ' (does not contribute to Explorer-of-X achievement)'
+            labels.append(label)
+        if labels:
+            self.notice('Not fully explored levels:')
+            self.notice('\n'.join(sorted(labels)))
+        self.notice(f'Total not fully explored levels: {len(unexplored)}')
+        self.notice('')
 
     def create_save_structure(self) -> Dict[int, Any]:
         raise NotImplementedError()
 
-    def setup_game_specific_args(self, parser) -> None:
+    @staticmethod
+    def setup_game_specific_args(parser: argparse.ArgumentParser) -> None:
         """
-        Function to add game-specific arguments.  By default it does nothing,
+        Function to add game-specific arguments. By default it does nothing,
         must be overridden
         """
         pass
-
-    def parse_args(self, argv):
-        """
-        Parse our arguments.
-        """
-
-        def non_empty_string(s):
-            if len(s) > 0:
-                return s
-            raise argparse.ArgumentTypeError("Value must have length greater than 0")
-
-        def positive_int(value):
-            try:
-                result = int(value)
-            except Exception:
-                raise argparse.ArgumentTypeError(f'positive integer value required: {value!r}')
-
-            if result > 0:
-                return result
-
-            raise argparse.ArgumentTypeError(f'positive integer value required: {result!r}')
-
-        # Set up our config object
-        config = Config()
-
-        parser = argparse.ArgumentParser(
-            description=f'Modify {self.game_name} Save Files',
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        )
-
-        # Optional args
-
-        parser.add_argument(
-            '-o',
-            '--output',
-            choices=['savegame', 'decoded', 'decodedjson', 'json', 'items', 'none'],
-            default='savegame',
-            help="""
-                    Output file format.  The most useful to humans are: savegame, json, and items.
-                    If no output file is specified, this will revert to `none`.
-                    """,
-        )
-
-        parser.add_argument(
-            '-i',
-            '--import-items',
-            dest='import_items',
-            help='read in codes for items and add them to the bank and inventory',
-        )
-
-        parser.add_argument(
-            '-j',
-            '--json',
-            action='store_true',
-            help='read savegame data from JSON format, rather than savegame',
-        )
-
-        parser.add_argument(
-            '-b',
-            '--bigendian',
-            action='store_true',
-            dest='big_endian',
-            help='change the output format to big-endian, to write PS/xbox save files',
-        )
-
-        parser.add_argument(
-            '-q',
-            '--quiet',
-            dest='verbose',
-            action='store_false',
-            help='quiet output (should generate no output unless there are errors)',
-        )
-
-        parser.add_argument(
-            '-f',
-            '--force',
-            action='store_true',
-            help='force output file overwrite, if the destination file exists',
-        )
-
-        # More optional args - used to be the "modify" option
-
-        parser.add_argument(
-            '--name',
-            type=non_empty_string,
-            help='Set the name of the character',
-        )
-
-        parser.add_argument(
-            '--save-game-id',
-            dest='save_game_id',
-            type=positive_int,
-            help='Set the save game slot ID of the character (probably not actually needed ever)',
-        )
-
-        parser.add_argument(
-            '--level',
-            type=int,
-            help=f'Set the character to this level (from 1 to {self.max_level})',
-        )
-
-        parser.add_argument(
-            '--money',
-            type=int,
-            help='Money to set for character',
-        )
-
-        # B2 and TPS have different currency types, so this function is
-        # implemented in the implementing classes.
-        self.setup_currency_args(parser)
-
-        parser.add_argument(
-            '--itemlevels',
-            type=int,
-            dest='item_levels',
-            help='Set item levels (to set to current player level, specify 0).'
-            'Skips level 1 items unless --forceitemlevels is specified too',
-        )
-
-        parser.add_argument(
-            '--forceitemlevels',
-            action='store_true',
-            dest='force_item_levels',
-            help='Set item levels even if the item is at level 1',
-        )
-
-        parser.add_argument(
-            '--backpack',
-            help=f'Set size of backpack (maximum is {self.max_backpack_size}, "max" may be specified)',
-        )
-
-        parser.add_argument(
-            '--bank',
-            help=f'Set size of bank (maximum is {self.max_bank_size}, "max" may be specified)',
-        )
-
-        parser.add_argument(
-            '--gunslots',
-            type=int,
-            choices=[2, 3, 4],
-            dest='gun_slots',
-            help='Set number of gun slots open',
-        )
-
-        parser.add_argument(
-            '--copy-nvhm-missions',
-            dest='copy_nvhm_missions',
-            action='store_true',
-            help='Copies NVHM mission state to both TVHM and UVHM modes.  Also unlocks TVHM/UVHM',
-        )
-
-        parser.add_argument(
-            '--unlock',
-            action=DictAction,
-            choices=self.unlock_choices,
-            default={},
-            help='Game features to unlock',
-        )
-
-        parser.add_argument(
-            '--challenges',
-            action=DictAction,
-            choices=['zero', 'max', 'bonus'],
-            default={},
-            help='Levels to set on challenge data',
-        )
-
-        parser.add_argument(
-            '--maxammo',
-            action='store_true',
-            dest='max_ammo',
-            help='Fill all ammo pools to their maximum',
-        )
-
-        parser.add_argument(
-            '--fix-challenge-overflow',
-            action='store_true',
-            help='Fix values for challenges which appear as huge negative numbers',
-        )
-
-        parser.add_argument(
-            '--print-unexplored-levels',
-            action='store_true',
-            help='Print level names that are not fully explored by player',
-        )
-
-        # Positional args
-
-        parser.add_argument('input_filename', help='Input filename, can be "-" to specify STDIN')
-
-        parser.add_argument(
-            'output_filename',
-            nargs='?',
-            help="""
-                    Output filename, can be "-" to specify STDOUT.  Can be optional, in
-                    which case no output file is produced.
-                    """,
-        )
-
-        # Additional game-specific arguments
-        self.setup_game_specific_args(parser)
-
-        # Actually parse the args
-        parser.parse_args(argv, config)
-
-        # Do some extra fiddling
-        config.finish(
-            parser=parser,
-            max_level=self.max_level,
-            min_backpack_size=self.min_backpack_size,
-            max_backpack_size=self.max_backpack_size,
-            min_bank_size=self.min_bank_size,
-            max_bank_size=self.max_bank_size,
-        )
-
-        # Some sanity checking with output type and output_filename
-        if config.output_filename is None:
-            # If we requested any changes, the only sensible course is to write them out
-            if config.changes:
-                parser.error("No output_filename was specified, but changes were requested")
-
-            # If we manually specified an output type, we'll also need an output filename.
-            # It's possible in this case that the user explicitly set `savegame` as the
-            # output, rather than just leaving it at the default, but I don't think it's
-            # worth the shenanigans necessary to detect that.
-            if config.output not in {'savegame', 'none'}:
-                parser.error(f"No output_filename was specified, but output type '{config.output}' was specified")
-
-            # If we got here, we're probably good, but force ourselve to `none` output
-            config.output = 'none'
-
-        else:
-            # If we have an output filename but `none` output, complain about it.
-            if config.output == 'none':
-                parser.error("Output filename specified but with `none` output")
-
-        return config
 
     @staticmethod
     def notice(message) -> None:

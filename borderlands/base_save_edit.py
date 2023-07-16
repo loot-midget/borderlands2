@@ -9,7 +9,6 @@ from borderlands.bltps import AppTPS
 
 MIN_PYTHON = (3, 9)
 
-
 ERROR_TEMPLATE = """
 Something went wrong, but please ensure you have the latest
 version from https://github.com/apocalyptech/borderlands2 before

@@ -1,6 +1,6 @@
 import binascii
 import struct
-from typing import Any, Tuple, Union, List
+from typing import Any, Union, List
 
 from borderlands.datautil.protobuf import PlayerDict
 
