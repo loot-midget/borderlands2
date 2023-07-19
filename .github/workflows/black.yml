@@ -1,7 +1,7 @@
 # https://black.readthedocs.io/en/stable/integrations/github_actions.html
 name: Lint
 
-on: [ push, pull_request ]
+on: [push, pull_request]
 
 jobs:
   lint:
