@@ -1,15 +1,19 @@
 import argparse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from borderlands import bl2_data
+from borderlands.bl2_explorer_achievements import create_explorer_achievements_report
 from borderlands.datautil.common import unwrap_float, wrap_float, unwrap_bytes, wrap_bytes
+from borderlands.datautil.data_types import PlayerDict
 from borderlands.savefile import BaseApp
 
 
-def bl2_op_level(value: Any) -> int:
+def bl2_op_level(value: Any) -> Optional[int]:
     """
     Helper function for argparse which requires a valid Overpower level
     """
+    if value is None:
+        return None
     try:
         int_val = int(value)
     except ValueError:
@@ -52,9 +56,7 @@ class AppBL2(BaseApp):
                 'sniper': [48, 60, 72, 84, 96, 108, 120, 132],
             },
             unlock_choices=['slaughterdome', 'tvhm', 'uvhm', 'challenges', 'ammo'],
-            levels_to_travel_station_map=bl2_data.LEVELS_TO_TRAVEL_STATION_MAP,
-            no_exploration_challenge_levels=bl2_data.NO_EXPLORATION_CHALLENGE_LEVELS,
-            challenges=bl2_data.create_challenges(),
+            challenges=bl2_data.create_bl2_challenges(),
         )
 
     def create_save_structure(self) -> Dict[int, Any]:
@@ -206,7 +208,14 @@ class AppBL2(BaseApp):
     @staticmethod
     def setup_game_specific_args(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
+            '--oplevel',
             type=bl2_op_level,
             dest='op_level',
             help='OP Level to unlock (will also unlock TVHM/UVHM if not already unlocked)',
         )
+
+    def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
+        explored_areas = self.get_fully_explored_areas(player)
+        report = create_explorer_achievements_report(explored_areas)
+        for line in report:
+            self.notice(line)

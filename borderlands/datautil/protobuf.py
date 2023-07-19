@@ -1,11 +1,10 @@
 import io
 import struct
-from typing import Dict, Any
+from typing import Any
 
 from borderlands.datautil.common import wrap_bytes, guess_wire_type
+from borderlands.datautil.data_types import PlayerDict
 from borderlands.datautil.errors import BorderlandsError
-
-PlayerDict = Dict[int, list]
 
 
 def remove_structure(data: dict, inv: dict) -> dict:

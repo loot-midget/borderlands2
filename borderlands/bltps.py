@@ -40,8 +40,6 @@ class AppTPS(BaseApp):
                 'sniper': [48, 60, 72, 84, 96, 108, 120, 132],
             },
             unlock_choices=['tvhm', 'uvhm', 'challenges', 'ammo'],
-            levels_to_travel_station_map=bltps_data.LEVELS_TO_TRAVEL_STATION_MAP,
-            no_exploration_challenge_levels=bltps_data.NO_EXPLORATION_CHALLENGE_LEVELS,
             challenges=bltps_data.create_bltps_challenges(),
         )
 

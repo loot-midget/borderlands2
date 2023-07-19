@@ -2,7 +2,7 @@ import binascii
 import struct
 from typing import Any, Union, List
 
-from borderlands.datautil.protobuf import PlayerDict
+from borderlands.datautil.data_types import PlayerDict
 
 
 def wrap_float(v: float) -> List[Union[int, Any]]:

@@ -2,6 +2,8 @@ from typing import Final, Dict
 
 from borderlands.challenges import Challenge, ChallengeCategory
 
+
+# NOTE: unused now
 LEVELS_TO_TRAVEL_STATION_MAP: Final = {
     'Access_P': "Tycho's Ribs",
     'CentralTerminal_P': "Hyperion Hub of Heroism",
@@ -38,8 +40,6 @@ LEVELS_TO_TRAVEL_STATION_MAP: Final = {
     'Sublevel13_P': "Sub-Level 13",
     'Wreck_P': "Pity's Fall",
 }
-
-NO_EXPLORATION_CHALLENGE_LEVELS: Final = set()
 
 
 def create_bltps_challenges() -> Dict[int, Challenge]:

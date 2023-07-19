@@ -34,8 +34,8 @@ from borderlands.datautil.protobuf import (
     apply_structure,
     write_protobuf,
     remove_structure,
-    PlayerDict,
 )
+from borderlands.datautil.data_types import PlayerDict
 
 
 class BaseApp:
@@ -211,8 +211,6 @@ class BaseApp:
         black_market_keys: Tuple[str, ...],
         black_market_ammo: Dict[str, List[int]],
         unlock_choices: List[str],  # Available choices for --unlock option
-        levels_to_travel_station_map: Dict[str, str],
-        no_exploration_challenge_levels: Set[str],
         challenges: Dict[int, Challenge],
     ) -> None:
         # B2 version is 7, TPS version is 10
@@ -230,12 +228,6 @@ class BaseApp:
         # what the max ammo is at each level.  Could be computed pretty
         # easily, but we may as well just store it.
         self.black_market_ammo = black_market_ammo
-
-        # Level-to-Name Mapping
-        self.levels_to_travel_station_map = levels_to_travel_station_map
-
-        # Maps which don't actually contribute to the "Explorer-of-X" achievements
-        self.no_exploration_challenge_levels = no_exploration_challenge_levels
 
         # There are two possible ways of uniquely identifying challenges in this file:
         # via their numeric position in the list, or by what looks like an internal
@@ -549,7 +541,7 @@ class BaseApp:
 
         player = read_protobuf(self.unwrap_player_data(data))
         if self.config.print_unexplored_levels:
-            self.print_explored_levels(player)
+            self.report_explorer_achievements_progress(player)
 
     def modify_save(self, data):
         """
@@ -1081,26 +1073,8 @@ class BaseApp:
         names = [x.decode('utf-8') for x in json_data['explored_areas']]
         return names
 
-    def print_explored_levels(self, player: PlayerDict) -> None:
-        if not self.levels_to_travel_station_map:
-            self.error(f'levels_to_travel_station_map is empty in class {self.__class__.__name__}')
-            return
-
-        unique_names = set(self.levels_to_travel_station_map.keys())
-        explored_areas = self.get_fully_explored_areas(player)
-        unexplored = set(unique_names) - set(explored_areas)
-        labels = []
-        for name in unexplored:
-            travel_station = self.levels_to_travel_station_map.get(name, name)
-            label = f'  {travel_station} ({name})'
-            if name in self.no_exploration_challenge_levels:
-                label += ' (does not contribute to Explorer-of-X achievement)'
-            labels.append(label)
-        if labels:
-            self.notice('Not fully explored levels:')
-            self.notice('\n'.join(sorted(labels)))
-        self.notice(f'Total not fully explored levels: {len(unexplored)}')
-        self.notice('')
+    def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
+        self.notice(f'No explorer achievements info in {self.__class__.__name__}')
 
     def create_save_structure(self) -> Dict[int, Any]:
         raise NotImplementedError()
