@@ -2,7 +2,6 @@ from typing import Final, Dict
 
 from borderlands.challenges import Challenge, ChallengeCategory
 
-
 # NOTE: unused now
 LEVELS_TO_TRAVEL_STATION_MAP: Final = {
     'Access_P': "Tycho's Ribs",

@@ -2,8 +2,6 @@ import binascii
 import struct
 from typing import Any, Union, List
 
-from borderlands.datautil.data_types import PlayerDict
-
 
 def wrap_float(v: float) -> List[Union[int, Any]]:
     return [5, struct.unpack("<I", struct.pack("<f", v))[0]]
@@ -78,7 +76,7 @@ def xor_data(data, key: int) -> bytes:
     return bytes(output)
 
 
-def replace_raw_item_key(data: PlayerDict, key: int) -> bytes:
+def replace_raw_item_key(data: bytes, key: int) -> bytes:
     old_key = struct.unpack(">i", data[1:5])[0]
     item = rotate_data_right(xor_data(data[5:], old_key >> 5), old_key & 31)[2:]
     header = struct.pack(">Bi", data[0], key)

@@ -77,7 +77,7 @@ _BL2_EXPLORER_ACHIEVEMENTS: Final = (
     ),
     ExplorerAchievementInfo(
         name='Highlands Explorer',
-        explanation='Discovered all named locations in The Highlands, Thousand Cuts, and Wildlife Exploitation Preserve',
+        explanation='Discovered all named locations in The Highlands, Thousand Cuts and Wildlife Exploitation Preserve',
         guide_url='https://www.trueachievements.com/a167559/highlands-explorer-achievement',
         code_to_name_map={
             'Grass_Cliffs_P': 'Thousand Cuts',

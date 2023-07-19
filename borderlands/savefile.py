@@ -9,13 +9,14 @@ import os
 import random
 import struct
 import sys
-from typing import List, Tuple, Dict, Set, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 
 from borderlands.challenges import Challenge
 from borderlands.config import parse_args
 from borderlands.datautil.bitstreams import ReadBitstream, WriteBitstream
 from borderlands.datautil.common import conv_binary_to_str, rotate_data_right, rotate_data_left, xor_data
 from borderlands.datautil.common import invert_structure, replace_raw_item_key
+from borderlands.datautil.data_types import PlayerDict
 from borderlands.datautil.errors import BorderlandsError
 from borderlands.datautil.huffman import (
     read_huffman_tree,
@@ -35,7 +36,6 @@ from borderlands.datautil.protobuf import (
     write_protobuf,
     remove_structure,
 )
-from borderlands.datautil.data_types import PlayerDict
 
 
 class BaseApp:
@@ -308,7 +308,7 @@ class BaseApp:
             i = j
         return values
 
-    def wrap_item(self, is_weapon: int, values: list, key: int) -> bytes:
+    def wrap_item(self, *, is_weapon: int, values: list, key: int) -> bytes:
         item = self.pack_item_values(is_weapon, values)
         header = struct.pack(">Bi", (is_weapon << 7) | self.item_struct_version, key)
         padding = b"\xff" * (33 - len(item))
@@ -332,7 +332,7 @@ class BaseApp:
         sdu_list = [value[k] for k in self.black_market_keys[: len(value)]]
         return write_repeated_protobuf_value(sdu_list, 0)
 
-    def unwrap_challenges(self, data):
+    def unwrap_challenges(self, data: bytes) -> dict:
         """
         Unwraps our challenge data.  The first ten bytes are a header:
 
@@ -374,9 +374,7 @@ class BaseApp:
 
         challenges = self.challenges
 
-        (unknown, size_in_bytes, num_challenges) = struct.unpack(self.config.endian + 'IIH', data[:10])
-        mydict = {'unknown': unknown}
-
+        unknown, size_in_bytes, num_challenges = struct.unpack(self.config.endian + 'IIH', data[:10])
         # Sanity check on size reported
         if (size_in_bytes + 8) != len(data):
             raise BorderlandsError(f'Challenge data reported as {size_in_bytes} bytes, but {len(data) - 8} bytes found')
@@ -386,7 +384,7 @@ class BaseApp:
             raise BorderlandsError(f'{num_challenges} challenges reported, but {size_in_bytes - 2} bytes of data found')
 
         # Now read them in
-        mydict['challenges'] = []
+        challenges_result = []
         for challenge in range(num_challenges):
             idx = 10 + (challenge * 12)
             challenge_dict = dict(
@@ -395,7 +393,7 @@ class BaseApp:
                     struct.unpack(self.config.endian + 'HBIBI', data[idx : idx + 12]),
                 )
             )
-            mydict['challenges'].append(challenge_dict)
+            challenges_result.append(challenge_dict)
 
             if challenge_dict['id'] in challenges:
                 info = challenges[challenge_dict['id']]
@@ -404,9 +402,9 @@ class BaseApp:
                 challenge_dict['_name'] = info.name
                 challenge_dict['_description'] = info.description
 
-        return mydict
+        return {'unknown': unknown, 'challenges': challenges_result}
 
-    def wrap_challenges(self, data):
+    def wrap_challenges(self, data: dict) -> bytes:
         """
         Re-wrap our challenge data.  See the notes above in unwrap_challenges for
         details on the structure.
@@ -439,7 +437,7 @@ class BaseApp:
             )
         return b.getvalue()
 
-    def unwrap_item_info(self, value):
+    def unwrap_item_info(self, value: PlayerDict) -> dict:
         is_weapon, item, key = self.unwrap_item(value)
         data = {"is_weapon": is_weapon, "key": key, "set": item[0], "level": [item[4], item[5]]}
         for i, (k, bits) in enumerate(self.item_header_sizes[is_weapon]):
@@ -458,7 +456,7 @@ class BaseApp:
         data["parts"] = parts
         return data
 
-    def wrap_item_info(self, value):
+    def wrap_item_info(self, value: dict) -> bytes:
         item = [value["set"]]
         for key, bits in self.item_header_sizes[value["is_weapon"]]:
             v = value[key]
@@ -470,10 +468,10 @@ class BaseApp:
                 item.append(None)
             else:
                 item.append((v["lib"] << bits) | v["asset"])
-        return self.wrap_item(value["is_weapon"], item, value["key"])
+        return self.wrap_item(is_weapon=value["is_weapon"], values=item, key=value["key"])
 
     @staticmethod
-    def unwrap_player_data(data):
+    def unwrap_player_data(data: bytes) -> bytes:
         """
         Byte order on the few struct calls here appears to actually be
         hardcoded regardless of platform, so we're perhaps just leaving
@@ -508,7 +506,7 @@ class BaseApp:
 
         return player
 
-    def wrap_player_data(self, player):
+    def wrap_player_data(self, player: bytes) -> bytes:
         """
         There's one call in here which had a hard-coded endian, as with
         unwrap_player_data above, so we're leaving that hardcoded for now.
@@ -529,7 +527,7 @@ class BaseApp:
 
         return hashlib.sha1(data).digest() + data
 
-    def show_save_info(self, data):
+    def show_save_info(self, data: bytes) -> None:
         """
         Shows information from file data, based on our config object.
         "data" should be the raw data from a save file.
@@ -543,7 +541,7 @@ class BaseApp:
         if self.config.print_unexplored_levels:
             self.report_explorer_achievements_progress(player)
 
-    def modify_save(self, data):
+    def modify_save(self, data: bytes) -> bytes:
         """
         Performs a set of modifications on file data, based on our
         config object.  "data" should be the raw data from a save
@@ -623,7 +621,7 @@ class BaseApp:
                     is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
                     if self.config.force_item_levels or item[4] > 1:
                         item = item[:4] + [level, level] + item[6:]
-                        field_data[1][0][1] = self.wrap_item(is_weapon, item, key)
+                        field_data[1][0][1] = self.wrap_item(is_weapon=is_weapon, values=item, key=key)
                         field[1] = write_protobuf(field_data)
                     else:
                         if item[4] == 1 and not seen_level_1_warning:
@@ -658,7 +656,8 @@ class BaseApp:
                 field_data = read_protobuf(field[1])
                 if 2 in field_data:
                     is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
-                    if item[0] == 255 and not any([val != 0 for val in item[1:]]):
+                    # TODO: refactor condition below to function
+                    if item[0] == 255 and all([val == 0 for val in item[1:]]):
                         idnum = (-field_data[2][0][1]) & 0xFF
                         # An ID of 4 is the one we're after
                         if idnum == 4:
@@ -851,7 +850,7 @@ class BaseApp:
 
         # This should always come after the ammo-unlock section, since our
         # max ammo will change if more black market SDUs are unlocked.
-        if self.config.maxammo is not None:
+        if self.config.max_ammo is not None:
             self.debug(' - Setting ammo pools to maximum')
 
             # First we got a figure out our black market levels
@@ -941,7 +940,7 @@ class BaseApp:
             player[15][0][1] = self.wrap_challenges(data)
 
         if self.config.fix_challenge_overflow:
-            self.debug('Fix challenge overflow:')
+            self.notice('Fix challenge overflow')
             data = self.unwrap_challenges(player[15][0][1])
 
             for save_challenge in data['challenges']:
@@ -964,7 +963,7 @@ class BaseApp:
 
         return self.wrap_player_data(write_protobuf(player))
 
-    def export_items(self, data, output):
+    def export_items(self, data, output) -> None:
         """
         Exports items stored in savegame data 'data' to the open
         filehandle 'output'
@@ -978,7 +977,7 @@ class BaseApp:
                 continue
             print(f'; {name}', file=output)
             for field in content:
-                raw: PlayerDict = read_protobuf(field[1])[1][0][1]
+                raw: Union[PlayerDict, bytes] = read_protobuf(field[1])[1][0][1]
 
                 # Borderlands uses some sort-of "fake" items to store some DLC
                 # data.  As per the Gibbed sourcecode, this includes:
@@ -994,12 +993,12 @@ class BaseApp:
                 # Gibbed.Borderlands2.FileFormats/SaveExpansion.cs for details
                 # on how to parse the `unknown2` field.
                 is_weapon, item, key = self.unwrap_item(raw)
-                if item[0] == 255 and not any([val != 0 for val in item[1:]]):
+                if item[0] == 255 and all([val == 0 for val in item[1:]]):
                     skipped_count += 1
                 else:
                     count += 1
-                    raw = replace_raw_item_key(raw, 0)
-                    printable = base64.b64encode(raw).decode("latin1")
+                    raw_bytes = replace_raw_item_key(raw, 0)
+                    printable = base64.b64encode(raw_bytes).decode("latin1")
                     code = f'{self.item_prefix}({printable})'
                     print(code, file=output)
             self.debug(f' - {name} exported: {count}')

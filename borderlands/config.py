@@ -62,6 +62,7 @@ class Config(argparse.Namespace):
     op_level = None
     unlock = {}
     challenges = {}
+    fix_challenge_overflow = False
 
     # Config options interpreted from the above
     endian = '<'
@@ -102,6 +103,7 @@ class Config(argparse.Namespace):
                 self.backpack,
                 self.bank,
                 self.eridium,
+                self.fix_challenge_overflow,
                 self.gun_slots,
                 self.item_levels,
                 self.level,
@@ -118,7 +120,7 @@ class Config(argparse.Namespace):
             self.changes = True
 
         # Next, boolean args which are set to True
-        if any([self.copy_nvhm_missions]):
+        if self.copy_nvhm_missions:
             self.changes = True
 
         # Finally, any unlocks/challenges we mean to set
@@ -126,7 +128,7 @@ class Config(argparse.Namespace):
             self.changes = True
 
         # Now set our "show_info" boolean.  Just a single boolean option, at the moment
-        if any([self.print_unexplored_levels]):
+        if self.print_unexplored_levels:
             self.show_info = True
 
         # Can't read/write to the same file
@@ -167,7 +169,7 @@ class DictAction(argparse.Action):
         """
         if nargs is not None:
             raise ValueError('nargs is not allowed')
-        super(DictAction, self).__init__(option_strings, dest, **kwargs)
+        super().__init__(option_strings, dest, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
         """

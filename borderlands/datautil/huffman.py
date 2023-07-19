@@ -91,7 +91,7 @@ def invert_tree(node, code=0, bits=0) -> dict:
         return result
 
 
-def huffman_decompress(tree, bitstream, size):
+def huffman_decompress(tree, bitstream, size) -> bytes:
     output = bytearray()
     while len(output) < size:
         node = tree
