@@ -215,7 +215,7 @@ class AppBL2(BaseApp):
         )
 
     def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
-        explored_areas = self.get_fully_explored_areas(player)
-        report = create_explorer_achievements_report(explored_areas)
+        fully_explored_maps = self.get_fully_explored_areas(player)
+        report = create_explorer_achievements_report(fully_explored_maps)
         for line in report:
             self.notice(line)

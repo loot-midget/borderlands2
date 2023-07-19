@@ -162,10 +162,10 @@ _NOT_EXPLORER_ACHIEVEMENTS_MAP: Final = {
 }
 
 
-def report_one_explorer_achievement(*, fully_explored_stations: List[str], info: ExplorerAchievementInfo) -> List[str]:
+def report_one_explorer_achievement(*, fully_explored_maps: List[str], info: ExplorerAchievementInfo) -> List[str]:
     result = []
     all_maps = set(info.code_to_name_map.keys())
-    incomplete_maps = all_maps - set(fully_explored_stations)
+    incomplete_maps = all_maps - set(fully_explored_maps)
     complete_maps = all_maps - incomplete_maps
     if incomplete_maps:
         result.append(f'{info.name} - Partially ({len(complete_maps)}/{len(all_maps)})')
@@ -182,9 +182,9 @@ def report_one_explorer_achievement(*, fully_explored_stations: List[str], info:
     return result
 
 
-def create_explorer_achievements_report(fully_explored_stations: List[str]) -> List[str]:
+def create_explorer_achievements_report(fully_explored_maps: List[str]) -> List[str]:
     result = []
     for info in _BL2_EXPLORER_ACHIEVEMENTS:
-        result.extend(report_one_explorer_achievement(fully_explored_stations=fully_explored_stations, info=info))
+        result.extend(report_one_explorer_achievement(fully_explored_maps=fully_explored_maps, info=info))
     result.append('')
     return result
