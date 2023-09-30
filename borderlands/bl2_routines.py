@@ -56,7 +56,6 @@ def _reset_bad_touch(player: PlayerDict, endian: str) -> None:
 
     for save_challenge in data2['challenges']:
         if save_challenge['id'] == 1836:
-            print('1836:', repr(save_challenge))
             save_challenge['total_value'] = 0
 
     player[15][0][1] = wrap_challenges(data=data2, endian=endian)
