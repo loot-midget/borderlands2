@@ -344,6 +344,12 @@ def parse_args(
         help='Print level names that are not fully explored by player',
     )
 
+    parser.add_argument(
+        '--report-challenge-stats',
+        action='store_true',
+        help='Print killing stats',
+    )
+
     # Positional args
 
     parser.add_argument('input_filename', help='Input filename, can be "-" to specify STDIN')

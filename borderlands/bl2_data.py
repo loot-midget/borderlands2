@@ -90,7 +90,7 @@ def create_bl2_challenges() -> Dict[int, Challenge]:
         id_text="GD_Sage_Challenges.Challenges.Challenge_Sage_KillBoroks",
         category=challenge_cat_dlc4,
         name="Boroking Around",
-        description="kill boroks",
+        description="Kill boroks",
         levels=(10, 20, 50, 80, 120),
     )
     challenges[1953] = Challenge(

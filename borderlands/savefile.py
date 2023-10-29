@@ -209,17 +209,17 @@ class BaseApp:
     ]
 
     def __init__(
-        self,
-        *,
-        args: List[str],
-        item_struct_version: int,
-        game_name: str,
-        item_prefix: str,
-        max_level: int,  # Max char level
-        black_market_keys: Tuple[str, ...],
-        black_market_ammo: Dict[str, List[int]],
-        unlock_choices: List[str],  # Available choices for --unlock option
-        challenges: Dict[int, Challenge],
+            self,
+            *,
+            args: List[str],
+            item_struct_version: int,
+            game_name: str,
+            item_prefix: str,
+            max_level: int,  # Max char level
+            black_market_keys: Tuple[str, ...],
+            black_market_ammo: Dict[str, List[int]],
+            unlock_choices: List[str],  # Available choices for --unlock option
+            challenges: Dict[int, Challenge],
     ) -> None:
         # B2 version is 7, TPS version is 10
         # "version" taken from what Gibbed calls it, not sure if that's
@@ -310,7 +310,7 @@ class BaseApp:
                 result.append(None)
                 continue
             value = 0
-            for b in data[j >> 3 : (i >> 3) - 1 : -1]:
+            for b in data[j >> 3: (i >> 3) - 1: -1]:
                 value = (value << 8) | b
             result.append((value >> (i & 7)) & ~(0xFF << size))
             i = j
@@ -457,10 +457,14 @@ class BaseApp:
         if self.config.print_unexplored_levels:
             self.report_explorer_achievements_progress(player)
 
-    def _set_level(self, player: PlayerDict) -> None:
-        if self.config.level is None:
-            return
+        if self.config.report_challenge_stats:
+            self.report_challenge_stats(player)
 
+    def _set_level(self, player: PlayerDict) -> bool:
+        if self.config.level is None:
+            return False
+
+        changed = False
         if self.config.level < 1 or self.config.level > len(self.required_xp):
             self.error(f'Invalid character level specified: {self.config.level}')
         else:
@@ -476,19 +480,21 @@ class BaseApp:
                     player[3][0][1] = lower
                     self.debug(f'   - Also updating XP to {lower}')
             player[2] = [[0, self.config.level]]
+            changed = True
+        return changed
 
-    def _set_money(self, player: PlayerDict) -> None:
+    def _set_money(self, player: PlayerDict) -> bool:
         if all(
-            x is None
-            for x in [
-                self.config.money,
-                self.config.eridium,
-                self.config.moonstone,
-                self.config.seraph,
-                self.config.torgue,
-            ]
+                x is None
+                for x in [
+                    self.config.money,
+                    self.config.eridium,
+                    self.config.moonstone,
+                    self.config.seraph,
+                    self.config.torgue,
+                ]
         ):
-            return
+            return False
 
         raw = player[6][0][1]
         b = io.BytesIO(raw)
@@ -511,87 +517,94 @@ class BaseApp:
             self.debug(f' - Setting available Torgue Tokens to {self.config.torgue}')
             values[4] = self.config.torgue
         player[6][0] = [0, values]
+        return True
 
-    def _set_item_level(self, player: PlayerDict) -> None:
+    def _set_item_level(self, player: PlayerDict) -> bool:
         seen_level_1_warning = False
-        if self.config.item_levels is not None:
-            if self.config.item_levels > 0:
-                self.debug(f' - Setting all items to level {self.config.item_levels}')
-                level = self.config.item_levels
-            else:
-                level = player[2][0][1]
-                self.debug(f' - Setting all items to character level ({level})')
-            for field_number in (53, 54):
-                for field in player[field_number]:
-                    field_data = read_protobuf(field[1])
-                    is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
-                    item_4 = item[4]
-                    if item_4 is not None:
-                        if self.config.force_item_levels or item_4 > 1:
-                            item = item[:4] + [level, level] + item[6:]
-                            field_data[1][0][1] = self.wrap_item(is_weapon=is_weapon, values=item, key=key)
-                            field[1] = write_protobuf(field_data)
-                        else:
-                            if item_4 == 1 and not seen_level_1_warning:
-                                seen_level_1_warning = True
-                                self.debug('   NOTICE: At least one item is level 1 and will not be updated.')
-                                self.debug('   Use --forceitemlevels to update these items')
+        if self.config.item_levels is None:
+            return False
 
-    def _set_overpowered_level(self, player: PlayerDict) -> None:
-        if self.config.op_level is not None:
-            set_op_level = False
-            self.debug(f' - Setting OP Level to {self.config.op_level}')
-
-            # Constructing the new value ahead of time since we'll need it
-            # no matter what else happens below.
-            # This little signed/unsigned dance is awful, but it lets us put the
-            # value in as the same format we got it.  So: awesome. Byte order
-            # shouldn't actually matter here so long as it's consistent.
-            new_field_data = struct.unpack(
-                '>Q', struct.pack('>q', -(4 | (max(0, min(self.config.op_level, 0x7FFFFF)) << 8)))
-            )[0]
-
-            # Now actually get on with it
-            if self.config.op_level > 0:
-                if player[7][0][1] < 2 and 'uvhm' not in self.config.unlock:
-                    self.config.unlock['uvhm'] = True
-                    self.debug('   - Also unlocking UVHM mode')
-            for field in player[53]:
+        if self.config.item_levels > 0:
+            self.debug(f' - Setting all items to level {self.config.item_levels}')
+            level = self.config.item_levels
+        else:
+            level = player[2][0][1]
+            self.debug(f' - Setting all items to character level ({level})')
+        for field_number in (53, 54):
+            for field in player[field_number]:
                 field_data = read_protobuf(field[1])
-                if 2 in field_data:
-                    is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
-                    # TODO: refactor condition below to function
-                    if item[0] == 255 and all([val == 0 for val in item[1:]]):
-                        idnum = (-field_data[2][0][1]) & 0xFF
-                        # An ID of 4 is the one we're after
-                        if idnum == 4:
-                            field_data[2][0][1] = new_field_data
-                            field[1] = write_protobuf(field_data)
-                            set_op_level = True
-                            break
-            if not set_op_level:
-                # If we didn't find an existing structure, we'll have to add our
-                # own in
-                self.debug('   - Creating new OP Level "virtual" item')
-                # More magic from Gibbed code
-                base_data = (
+                is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
+                item_4 = item[4]
+                if item_4 is not None:
+                    if self.config.force_item_levels or item_4 > 1:
+                        item = item[:4] + [level, level] + item[6:]
+                        field_data[1][0][1] = self.wrap_item(is_weapon=is_weapon, values=item, key=key)
+                        field[1] = write_protobuf(field_data)
+                    else:
+                        if item_4 == 1 and not seen_level_1_warning:
+                            seen_level_1_warning = True
+                            self.debug('   NOTICE: At least one item is level 1 and will not be updated.')
+                            self.debug('   Use --forceitemlevels to update these items')
+        return True
+
+    def _set_overpowered_level(self, player: PlayerDict) -> bool:
+        if self.config.op_level is None:
+            return False
+
+        set_op_level = False
+        self.debug(f' - Setting OP Level to {self.config.op_level}')
+
+        # Constructing the new value ahead of time since we'll need it
+        # no matter what else happens below.
+        # This little signed/unsigned dance is awful, but it lets us put the
+        # value in as the same format we got it.  So: awesome. Byte order
+        # shouldn't actually matter here so long as it's consistent.
+        new_field_data = struct.unpack(
+            '>Q', struct.pack('>q', -(4 | (max(0, min(self.config.op_level, 0x7FFFFF)) << 8)))
+        )[0]
+
+        # Now actually get on with it
+        if self.config.op_level > 0:
+            if player[7][0][1] < 2 and 'uvhm' not in self.config.unlock:
+                self.config.unlock['uvhm'] = True
+                self.debug('   - Also unlocking UVHM mode')
+        for field in player[53]:
+            field_data = read_protobuf(field[1])
+            if 2 in field_data:
+                is_weapon, item, key = self.unwrap_item(field_data[1][0][1])
+                # TODO: refactor condition below to function
+                if item[0] == 255 and all([val == 0 for val in item[1:]]):
+                    idnum = (-field_data[2][0][1]) & 0xFF
+                    # An ID of 4 is the one we're after
+                    if idnum == 4:
+                        field_data[2][0][1] = new_field_data
+                        field[1] = write_protobuf(field_data)
+                        set_op_level = True
+                        break
+        if not set_op_level:
+            # If we didn't find an existing structure, we'll have to add our
+            # own in
+            self.debug('   - Creating new OP Level "virtual" item')
+            # More magic from Gibbed code
+            base_data = (
                     b"\x07\x00\x00\x00\x00\x39\x2a\xff"
                     + b"\x00\x00\x00\x00\x00\x00\x00\x00"
                     + b"\x00\x00\x00\x00\x00\x00\x00\x00"
                     + b"\x00\x00\x00\x00\x00\x00\x00\x00"
                     + b"\x00\x00\x00\x00\x00\x00\x00\x00"
-                )
-                # noinspection PyDictCreation
-                entry = {}
-                entry[1] = [[2, base_data]]
-                entry[2] = [[0, new_field_data]]
-                entry[3] = [[0, 0]]
-                entry[4] = [[0, 0]]
-                player[53].append([2, write_protobuf(entry)])
+            )
+            # noinspection PyDictCreation
+            entry = {}
+            entry[1] = [[2, base_data]]
+            entry[2] = [[0, new_field_data]]
+            entry[3] = [[0, 0]]
+            entry[4] = [[0, 0]]
+            player[53].append([2, write_protobuf(entry)])
+        return True
 
-    def _set_backpack(self, player: PlayerDict) -> None:
+    def _set_backpack(self, player: PlayerDict) -> bool:
         if self.config.backpack is None:
-            return
+            return False
 
         self.debug(f' - Setting backpack size to {self.config.backpack}')
         size = self.config.backpack
@@ -605,10 +618,11 @@ class BaseApp:
         player[13][0][1] = write_protobuf(slots)
         s = read_repeated_protobuf_value(player[36][0][1], 0)
         player[36][0][1] = write_repeated_protobuf_value(s[:7] + [sdu_size] + s[8:], 0)
+        return True
 
-    def _set_bank(self, player: PlayerDict) -> None:
+    def _set_bank(self, player: PlayerDict) -> bool:
         if self.config.bank is None:
-            return
+            return False
 
         self.debug(f' - Setting bank size to {self.config.bank}')
         size = self.config.bank
@@ -625,10 +639,11 @@ class BaseApp:
         if len(s) < 9:
             s = s + (9 - len(s)) * [0]
         player[36][0][1] = write_repeated_protobuf_value(s[:8] + [sdu_size] + s[9:], 0)
+        return True
 
-    def _set_gun_slots(self, player: PlayerDict) -> None:
+    def _set_gun_slots(self, player: PlayerDict) -> bool:
         if self.config.gun_slots is None:
-            return
+            return False
 
         self.debug(f' - Setting available gun slots to {self.config.gun_slots}')
         n = self.config.gun_slots
@@ -637,10 +652,11 @@ class BaseApp:
         if slots[3][0][1] > n - 2:
             slots[3][0][1] = n - 2
         player[13][0][1] = write_protobuf(slots)
+        return True
 
-    def _copy_nvhm_missions(self, player: PlayerDict) -> None:
+    def _copy_nvhm_missions(self, player: PlayerDict) -> bool:
         if not self.config.copy_nvhm_missions:
-            return
+            return False
 
         self.debug(' - Copying NVHM mission status to TVHM+UVHM')
         if 'uvhm' not in self.config.unlock:
@@ -648,10 +664,11 @@ class BaseApp:
             self.debug('   - Also unlocking UVHM mode')
         player[18][1][1] = player[18][0][1]
         player[18][2][1] = player[18][0][1]
+        return True
 
-    def _unlock_slaughterdome(self, player: PlayerDict) -> None:
+    def _unlock_slaughterdome(self, player: PlayerDict) -> bool:
         if 'slaughterdome' not in self.config.unlock:
-            return
+            return False
 
         unlocked, notifications = b'', b''
         if 23 in player:
@@ -665,20 +682,25 @@ class BaseApp:
             notifications += b"\x01"
         player[23] = [[2, unlocked]]
         player[24] = [[2, notifications]]
+        return True
 
-    def _unlock_tvhm_uvhm(self, player: PlayerDict) -> None:
+    def _unlock_tvhm_uvhm(self, player: PlayerDict) -> bool:
+        changed = False
         if 'uvhm' in self.config.unlock:
             self.debug(' - Unlocking UVHM (and TVHM)')
             if player[7][0][1] < 2:
                 player[7][0][1] = 2
+                changed = True
         elif 'tvhm' in self.config.unlock:
             self.debug(' - Unlocking TVHM')
             if player[7][0][1] < 1:
                 player[7][0][1] = 1
+                changed = True
+        return changed
 
-    def _unlock_base_challenges(self, player: PlayerDict) -> None:
+    def _unlock_base_challenges(self, player: PlayerDict) -> bool:
         if 'challenges' not in self.config.unlock:
-            return
+            return False
 
         self.debug(' - Unlocking all non-level-specific challenges')
         challenge_unlocks = [apply_structure(read_protobuf(d[1]), self.save_structure[38][2]) for d in player[38]]
@@ -704,14 +726,19 @@ class BaseApp:
                     ),
                 ]
             )
+        return True
 
-    def _unlock_features(self, player: PlayerDict) -> None:
+    def _unlock_features(self, player: PlayerDict) -> bool:
         if not self.config.unlock:
-            return
+            return False
 
-        self._unlock_slaughterdome(player)
-        self._unlock_tvhm_uvhm(player)
-        self._unlock_base_challenges(player)
+        changed = False
+        if self._unlock_slaughterdome(player):
+            changed = True
+        if self._unlock_tvhm_uvhm(player):
+            changed = True
+        if self._unlock_base_challenges(player):
+            changed = True
 
         if 'ammo' in self.config.unlock:
             self.debug(' - Unlocking ammo capacity')
@@ -720,10 +747,13 @@ class BaseApp:
                 if key2 in self.black_market_ammo:
                     s[idx2] = 7
             player[36][0][1] = write_repeated_protobuf_value(s, 0)
+            changed = True
 
-    def _set_max_ammo(self, player: PlayerDict) -> None:
+        return changed
+
+    def _set_max_ammo(self, player: PlayerDict) -> bool:
         if self.config.max_ammo is None:
-            return
+            return False
 
         self.debug(' - Setting ammo pools to maximum')
 
@@ -779,10 +809,11 @@ class BaseApp:
                     'amount': float(max_ammo[ammo_type][1]),
                 }
                 player[11].append([2, write_protobuf(remove_structure(new_struct, inverted_structure))])
+        return True
 
-    def _handle_challenges(self, player: PlayerDict) -> None:
+    def _handle_challenges(self, player: PlayerDict) -> bool:
         if not self.config.challenges:
-            return
+            return False
 
         data2 = self.unwrap_challenges(player[15][0][1])
         # You can specify multiple options at once.  Specifying "max" and
@@ -808,7 +839,7 @@ class BaseApp:
                 save_challenge['total_value'] = save_challenge['previous_value']
             if do_max:
                 save_challenge['total_value'] = (
-                    save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_max()
+                        save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_max()
                 )
             if do_bonus and self.challenges[save_challenge['id']].bonus:
                 bonus_value = save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_bonus()
@@ -816,11 +847,12 @@ class BaseApp:
                     save_challenge['total_value'] = bonus_value
 
         player[15][0][1] = self.wrap_challenges(data2)
+        return True
 
-    def _fix_challenge_overflow(self, player: PlayerDict) -> None:
+    def _fix_challenge_overflow(self, player: PlayerDict) -> bool:
         # TODO: rewrite as standalone function and move to bl2_routines.py
         if not self.config.fix_challenge_overflow:
-            return
+            return False
 
         self.notice('Fix challenge overflow')
         data2 = self.unwrap_challenges(player[15][0][1])
@@ -830,24 +862,28 @@ class BaseApp:
                 if save_challenge['total_value'] >= 2000000000:
                     self.notice(f'fix overflow in: {save_challenge["_name"]}')
                     save_challenge['total_value'] = self.challenges[save_challenge['id']].get_max() + 1
+                    changed = True
 
         player[15][0][1] = self.wrap_challenges(data2)
+        return True
 
-    def _set_character_name(self, player: PlayerDict) -> None:
+    def _set_character_name(self, player: PlayerDict) -> bool:
         if self.config.name is None:
-            return
+            return False
 
         self.debug(f' - Setting character name to {self.config.name!r}')
         data2 = apply_structure(read_protobuf(player[19][0][1]), self.save_structure[19][2])
         data2['name'] = self.config.name
         player[19][0][1] = write_protobuf(remove_structure(data2, invert_structure(self.save_structure[19][2])))
+        return True
 
-    def _set_save_game_id(self, player: PlayerDict) -> None:
+    def _set_save_game_id(self, player: PlayerDict) -> bool:
         if self.config.save_game_id is None:
-            return
+            return False
 
         self.debug(f' - Setting save slot ID to {self.config.save_game_id}')
         player[20][0][1] = self.config.save_game_id
+        return True
 
     def modify_save(self, data: bytes) -> bytes:
         """
@@ -862,39 +898,59 @@ class BaseApp:
 
         player = read_protobuf(self.unwrap_player_data(data))
 
-        self._set_level(player)
-        self._set_money(player)
+        changed = False
+        if self._set_level(player):
+            changed = True
+
+        if self._set_money(player):
+            changed = True
 
         # Note that this block should always come *after* the block which sets
         # character level, in case we've been instructed to set items to the
         # character's level.
-        self._set_item_level(player)
+        if self._set_item_level(player):
+            changed = True
 
         # OP Level is stored in a weird little custom item.
         # See Gibbed.Borderlands2.FileFormats/SaveExpansion.cs for a bit more
         # rigorous example of how to process those properly.
         # Note that this needs to happen before the unlock section, since
         # it may trigger an unlock of UVHM if that wasn't already specified.
-        self._set_overpowered_level(player)
+        if self._set_overpowered_level(player):
+            changed = True
 
-        self._set_backpack(player)
-        self._set_bank(player)
-        self._set_gun_slots(player)
-        self._copy_nvhm_missions(player)
-        self._unlock_features(player)
+        if self._set_backpack(player):
+            changed = True
+        if self._set_bank(player):
+            changed = True
+        if self._set_gun_slots(player):
+            changed = True
+        if self._copy_nvhm_missions(player):
+            changed = True
+        if self._unlock_features(player):
+            changed = True
 
         # This should always come after the ammo-unlock section, since our
         # max ammo will change if more black market SDUs are unlocked.
-        self._set_max_ammo(player)
+        if self._set_max_ammo(player):
+            changed = True
 
-        self._handle_challenges(player)
-        self._fix_challenge_overflow(player)
-        self._set_character_name(player)
-        self._set_save_game_id(player)
+        if self._handle_challenges(player):
+            changed = True
+        if self._fix_challenge_overflow(player):
+            changed = True
+        if self._set_character_name(player):
+            changed = True
+        if self._set_save_game_id(player):
+            changed = True
 
-        self._reset_challenge_or_mission(player)
+        if self._reset_challenge_or_mission(player):
+            changed = True
 
-        return self.wrap_player_data(write_protobuf(player))
+        if changed:
+            return self.wrap_player_data(write_protobuf(player))
+        else:
+            return data
 
     def export_items(self, data, output) -> None:
         """
@@ -952,6 +1008,9 @@ class BaseApp:
 
     def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
         self.notice(f'No explorer achievements info in {self.__class__.__name__}')
+
+    def report_challenge_stats(self, player: PlayerDict) -> None:
+        self.notice(f'No challenge stats support in {self.__class__.__name__}')
 
     def create_save_structure(self) -> Dict[int, Any]:
         raise NotImplementedError()
@@ -1098,8 +1157,8 @@ class BaseApp:
         output_file = open(outfile, mode)
         return output_file, True
 
-    def _reset_challenge_or_mission(self, player: PlayerDict) -> None:
-        pass
+    def _reset_challenge_or_mission(self, player: PlayerDict) -> bool:
+        return False
 
     def run(self):
         """

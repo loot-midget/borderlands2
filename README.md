@@ -68,6 +68,7 @@ two.
 * [Getting Savegame Information](#getting-savegame-information)
     * [Printing out not-fully-explored levels](#printing-out-not-fully-explored-levels)
     * [Challenge Accepted achievement progress](#challenge-accepted-achievement-progress)
+  * [Print challenge statistics](#print-challenge-statistics)
 * [Combining Commandline Options](#combining-commandline-options)
 * [Working with Savegames to/from Consoles](#working-with-savegames-tofrom-consoles)
 * [Exporting character items](#exporting-character-items)
@@ -475,6 +476,24 @@ as the program processes the save:
 	- Shields: Ammo Eater: first level is incomplete, progress 19/20
 	- Vehicle: Blue Sparks: first level is incomplete, progress 2/5
 	Challenge Accepted: 3 problems found
+
+## Print challenge statistics
+
+Prints all challenge statistics even they are fully completed in game.
+How to use:
+
+    bl2_save_edit.py --report-challenge-stats Save0001.sav
+
+This will print statistics, one line per challenge (category, description, name, count):
+
+    Challenge statistics:
+    Assault Rifle: Get critical hits with assault rifles (This Is My Rifle...) - 10842
+    Assault Rifle: Get Second Winds with assault rifles (From My Cold, Dead Hands) - 7
+    Assault Rifle: Kill enemies with assault rifles (Aggravated Assault) - 2512
+    ...
+    Vehicle: Kill enemies while riding as a passenger (not a gunner) in a vehicle (Passive Aggressive) - 27
+    Vehicle: Kill vehicles while in a vehicle (...One Van Leaves) - 459
+    Total 144 lines
 
 # Combining Commandline Options
 

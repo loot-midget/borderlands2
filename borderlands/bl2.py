@@ -1,12 +1,13 @@
 import argparse
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from borderlands import bl2_data
 from borderlands.bl2_explorer_achievements import create_explorer_achievements_report
 from borderlands.bl2_routines import get_reset_proc, get_valid_reset_option_values
 from borderlands.datautil.common import unwrap_float, wrap_float, unwrap_bytes, wrap_bytes
 from borderlands.datautil.data_types import PlayerDict
+from borderlands.datautil.protobuf import apply_structure
 from borderlands.savefile import BaseApp
 
 
@@ -225,7 +226,7 @@ class AppBL2(BaseApp):
             dest='reset_key',
             type=str,
             help='reset specific mission or challenge. Valid options are: %r'
-            % (sorted(get_valid_reset_option_values()),),
+                 % (sorted(get_valid_reset_option_values()),),
         )
 
     def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
@@ -233,6 +234,36 @@ class AppBL2(BaseApp):
         report = create_explorer_achievements_report(fully_explored_maps)
         for line in report:
             self.notice(line)
+
+    def report_challenge_stats(self, player: PlayerDict) -> None:
+        json_data = apply_structure(player, self.save_structure)
+        if 'stats' not in json_data:
+            self.error('No "stats" field in decoded JSON')
+            return
+        stats = json_data['stats']
+        if not isinstance(stats, dict):
+            self.error(f'"stats" expected to be dict but got {type(stats)!r}')
+            return
+        if 'challenges' not in stats:
+            self.error('No "stats->challenges" field in decoded JSON')
+            return
+        challenges = stats['challenges']
+        if not isinstance(challenges, list):
+            self.error(f'"stats->challenges" expected to be list but got {type(challenges)!r}')
+            return
+        # challenge type | description | name | value
+        result: List[Tuple[str, str, str, int]] = []
+        for ch in challenges:
+            if '_category' in ch and '_description' in ch and '_name' in ch and 'total_value' in ch:
+                rec = ch['_category'], ch['_description'], ch['_name'], ch['total_value']
+                result.append(rec)
+
+        result.sort(key=lambda x: (x[0], x[1].lower()))
+        self.notice('Challenge statistics:')
+        for category, description, name, value in result:
+            self.notice(f'{category}: {description} ({name}) - {value}')
+        self.notice(f'Total {len(result)} lines')
+        self.notice('')
 
     def _show_save_info(self, player: PlayerDict) -> None:
         super()._show_save_info(player)
@@ -285,13 +316,14 @@ class AppBL2(BaseApp):
 
         self.notice('')
 
-    def _reset_challenge_or_mission(self, player: PlayerDict) -> None:
+    def _reset_challenge_or_mission(self, player: PlayerDict) -> bool:
         reset_key = self.config.reset_key
         if reset_key is None:
-            return
+            return False
         patch_proc = get_reset_proc(reset_key)
         if patch_proc is None:
             sys.exit(f'--reset: unknown key: {reset_key!r}')
 
         self.notice('Reset: ' + reset_key)
         patch_proc(player, self.config.endian)
+        return True
