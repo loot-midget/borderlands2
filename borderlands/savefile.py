@@ -209,17 +209,17 @@ class BaseApp:
     ]
 
     def __init__(
-            self,
-            *,
-            args: List[str],
-            item_struct_version: int,
-            game_name: str,
-            item_prefix: str,
-            max_level: int,  # Max char level
-            black_market_keys: Tuple[str, ...],
-            black_market_ammo: Dict[str, List[int]],
-            unlock_choices: List[str],  # Available choices for --unlock option
-            challenges: Dict[int, Challenge],
+        self,
+        *,
+        args: List[str],
+        item_struct_version: int,
+        game_name: str,
+        item_prefix: str,
+        max_level: int,  # Max char level
+        black_market_keys: Tuple[str, ...],
+        black_market_ammo: Dict[str, List[int]],
+        unlock_choices: List[str],  # Available choices for --unlock option
+        challenges: Dict[int, Challenge],
     ) -> None:
         # B2 version is 7, TPS version is 10
         # "version" taken from what Gibbed calls it, not sure if that's
@@ -310,7 +310,7 @@ class BaseApp:
                 result.append(None)
                 continue
             value = 0
-            for b in data[j >> 3: (i >> 3) - 1: -1]:
+            for b in data[j >> 3 : (i >> 3) - 1 : -1]:
                 value = (value << 8) | b
             result.append((value >> (i & 7)) & ~(0xFF << size))
             i = j
@@ -485,14 +485,14 @@ class BaseApp:
 
     def _set_money(self, player: PlayerDict) -> bool:
         if all(
-                x is None
-                for x in [
-                    self.config.money,
-                    self.config.eridium,
-                    self.config.moonstone,
-                    self.config.seraph,
-                    self.config.torgue,
-                ]
+            x is None
+            for x in [
+                self.config.money,
+                self.config.eridium,
+                self.config.moonstone,
+                self.config.seraph,
+                self.config.torgue,
+            ]
         ):
             return False
 
@@ -587,11 +587,11 @@ class BaseApp:
             self.debug('   - Creating new OP Level "virtual" item')
             # More magic from Gibbed code
             base_data = (
-                    b"\x07\x00\x00\x00\x00\x39\x2a\xff"
-                    + b"\x00\x00\x00\x00\x00\x00\x00\x00"
-                    + b"\x00\x00\x00\x00\x00\x00\x00\x00"
-                    + b"\x00\x00\x00\x00\x00\x00\x00\x00"
-                    + b"\x00\x00\x00\x00\x00\x00\x00\x00"
+                b"\x07\x00\x00\x00\x00\x39\x2a\xff"
+                + b"\x00\x00\x00\x00\x00\x00\x00\x00"
+                + b"\x00\x00\x00\x00\x00\x00\x00\x00"
+                + b"\x00\x00\x00\x00\x00\x00\x00\x00"
+                + b"\x00\x00\x00\x00\x00\x00\x00\x00"
             )
             # noinspection PyDictCreation
             entry = {}
@@ -839,7 +839,7 @@ class BaseApp:
                 save_challenge['total_value'] = save_challenge['previous_value']
             if do_max:
                 save_challenge['total_value'] = (
-                        save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_max()
+                    save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_max()
                 )
             if do_bonus and self.challenges[save_challenge['id']].bonus:
                 bonus_value = save_challenge['previous_value'] + self.challenges[save_challenge['id']].get_bonus()

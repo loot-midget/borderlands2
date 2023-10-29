@@ -226,7 +226,7 @@ class AppBL2(BaseApp):
             dest='reset_key',
             type=str,
             help='reset specific mission or challenge. Valid options are: %r'
-                 % (sorted(get_valid_reset_option_values()),),
+            % (sorted(get_valid_reset_option_values()),),
         )
 
     def report_explorer_achievements_progress(self, player: PlayerDict) -> None:
