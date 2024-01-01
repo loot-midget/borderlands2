@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from borderlands import bl2_data
 from borderlands.bl2_explorer_achievements import create_explorer_achievements_report
 from borderlands.bl2_routines import get_reset_proc, get_valid_reset_option_values
+from borderlands.bl2_skill_tree import make_bl2skills_link
 from borderlands.datautil.common import unwrap_float, wrap_float, unwrap_bytes, wrap_bytes
 from borderlands.datautil.data_types import PlayerDict
 from borderlands.datautil.protobuf import apply_structure
@@ -222,6 +223,11 @@ class AppBL2(BaseApp):
             help='print challenges that have to be completed up to level 1 in order to finish Challenge Accepted',
         )
         parser.add_argument(
+            '--print-skills-url',
+            action='store_true',
+            help='print URL for bl2skills.com site with skill tree from save file',
+        )
+        parser.add_argument(
             '--reset',
             dest='reset_key',
             type=str,
@@ -271,6 +277,9 @@ class AppBL2(BaseApp):
         if self.config.diagnose_challenge_accepted:
             self._diagnose_challenge_accepted(player)
 
+        if self.config.print_skills_url:
+            self._print_skills_url(player)
+
     def _diagnose_challenge_accepted(self, player: PlayerDict) -> None:
         self.notice('Challenge Accepted achievement progress:')
         data = self.unwrap_challenges(player[15][0][1])
@@ -315,6 +324,12 @@ class AppBL2(BaseApp):
             self.notice('Challenge Accepted: no problems found. It looks like Challenge Accepted already achieved.')
 
         self.notice('')
+
+    def _print_skills_url(self, player: PlayerDict) -> None:
+        self.notice('Link for character\'s skill tree representation:')
+        json_data = apply_structure(player, self.save_structure)
+        url = make_bl2skills_link(json_data)
+        self.notice(url)
 
     def _reset_challenge_or_mission(self, player: PlayerDict) -> bool:
         reset_key = self.config.reset_key
