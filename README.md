@@ -69,7 +69,7 @@ two.
     * [Printing out not-fully-explored levels](#printing-out-not-fully-explored-levels)
     * [Challenge Accepted achievement progress](#challenge-accepted-achievement-progress)
     * [Print challenge statistics](#print-challenge-statistics)
-    * [Get skills URL](#get-skills-url)
+    * [Print skills URL](#print-skills-url)
 * [Combining Commandline Options](#combining-commandline-options)
 * [Working with Savegames to/from Consoles](#working-with-savegames-tofrom-consoles)
 * [Exporting character items](#exporting-character-items)
@@ -496,9 +496,9 @@ This will print statistics, one line per challenge (category, description, name,
     Vehicle: Kill vehicles while in a vehicle (...One Van Leaves) - 459
     Total 144 lines
 
-## Get skills URL
+## Print skills URL
 
-Get skills for specific character and prepare URL for site bl2skills.com:
+Extract skills for specific character and prepare URL for bl2skills.com:
 
 How to use:
 
