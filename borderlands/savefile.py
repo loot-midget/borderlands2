@@ -1176,7 +1176,6 @@ class BaseApp:
         save_data = self._import_items(save_data)
 
         # Now perform any changes
-        self.debug('Performing requested changes')
         new_data = self.modify_save(save_data)
 
         self.show_save_info(new_data)
@@ -1203,14 +1202,16 @@ class BaseApp:
             self.debug('Writing savegame file')
             output_file.write(new_data)
         else:
-            player = self.unwrap_player_data(new_data)
+            player: bytes = self.unwrap_player_data(new_data)
             if self.config.output in ('decodedjson', 'json'):
                 self.debug('Converting to JSON for more human-readable output')
                 data = read_protobuf(player)
                 if self.config.output == 'json':
                     data = apply_structure(data, self.save_structure)
-                player = json.dumps(conv_binary_to_str(data), sort_keys=True, indent=4)
-            output_file.write(player)
+                player_str = json.dumps(conv_binary_to_str(data), sort_keys=True, indent=4)
+                output_file.write(player_str)
+            else:
+                output_file.write(player)
 
         if close:
             output_file.close()
