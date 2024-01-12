@@ -46,6 +46,7 @@ def make_skills_string(skill_records: List[SkillItem], skill_data: List[dict]) -
     values = []
     data = list(skill_data)
 
+    prev_branch_name = ''
     for name, max_value in skill_records:
         clean_name = re.sub(r'[\' \-!\",]', '', name).replace('%', 'percent').lower()
         clean_name = _MISNAME_FIXES.get(clean_name, clean_name)
@@ -58,6 +59,12 @@ def make_skills_string(skill_records: List[SkillItem], skill_data: List[dict]) -
         if found_index is None:
             sys.exit('unable to find value for skill %r (%r)' % (name, clean_name))
         value = data[found_index]['level']
+        skill_name = data[found_index]['name'].decode()
+        branch_name, skill = skill_name.split('.')[-2:]
+        if branch_name != prev_branch_name:
+            print('[%s]' % branch_name)
+            prev_branch_name = branch_name
+        print('%d - %s' % (value, skill))
         data.pop(found_index)
         if value < 0:
             sys.exit('%r/%r: negative value %d' % (name, clean_name, value))

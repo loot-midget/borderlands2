@@ -326,9 +326,9 @@ class AppBL2(BaseApp):
         self.notice('')
 
     def _print_skills_url(self, player: PlayerDict) -> None:
-        self.notice('Link for character\'s skill tree representation:')
         json_data = apply_structure(player, self.save_structure)
         url = make_bl2skills_link(json_data)
+        self.notice('Link for character\'s skill tree representation:')
         self.notice(url)
 
     def _reset_challenge_or_mission(self, player: PlayerDict) -> bool:
